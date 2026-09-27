@@ -119,15 +119,17 @@ class DeadlineLayer {
     const prev = this.host.querySelector(".tl-deadline-layer");
     if (prev) prev.remove();
 
+    //Fix the due circle of the squiggle getting cut off.
+    const PAD = 32;
     const svg = _svgEl("svg", {
       class: "tl-deadline-layer",
-      width: this.width,
-      height: this.height,
-      viewBox: `0 0 ${this.width} ${this.height}`,
+      width: this.width + 2 * PAD,
+      height: this.height + 2 * PAD,
+      viewBox: `${-PAD} ${-PAD} ${this.width + 2 * PAD} ${this.height + 2 * PAD}`,
     });
     svg.style.position = "absolute";
-    svg.style.left = "0";
-    svg.style.top = "0";
+    svg.style.left = `${-PAD}px`;
+    svg.style.top = `${-PAD}px`;
     svg.style.pointerEvents = "none";
     svg.style.zIndex = "15"; // above events (5), below modals (200)
 
@@ -170,7 +172,9 @@ class DeadlineLayer {
       const [h, m] = endpoint.time.split(":").map(Number);
       return h * 60 + m; // one minute = one pixel
     }
-    return 0; // all-day row top
+
+    // return 0 //this was clipping our deadline squiggles from the top so—
+    return -16; // all-day row top
   }
 
   _renderOne(svg, dl, byDueDay, today) {
@@ -316,9 +320,14 @@ class DeadlineLayer {
     // Offset overlapping heads on the same due day.
     let headOffset = 0;
     if (dl.due && dl.due.date && byDueDay.has(dl.due.date)) {
-      const group = byDueDay.get(dl.due.date);
+      const myY = this._yFor(dl.due);
+      const CLOSE_PX = 20; // roughly one line-height in your current SH/scale
+      const group = byDueDay
+        .get(dl.due.date)
+        .filter((other) => Math.abs(this._yFor(other.due) - myY) <= CLOSE_PX);
       const i = group.indexOf(dl);
-      headOffset = (i % 2 === 0 ? -1 : 1) * Math.ceil((i + 1) / 2) * 3;
+      headOffset =
+        i >= 0 ? (i % 2 === 0 ? -1 : 1) * Math.ceil((i + 1) / 2) * 3 : 0;
     }
     if (dl.due && dl.due.date) {
       x2 += headOffset;

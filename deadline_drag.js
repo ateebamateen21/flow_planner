@@ -17,21 +17,31 @@ class DeadlineDragCreate {
     this.scrollEl = scrollEl;
     this.geom = geom;
     this.draft = null;
+    this._hoverLayer = null; // persistent SVG for the hover ring
+    this._hoverRing = null; // the <circle> element inside _hoverLayer
+    this._lastHover = null; // last lattice point hovered (for change detection)
 
     this._onMouseDown = this._onMouseDown.bind(this);
     this._onMouseMove = this._onMouseMove.bind(this);
     this._onMouseUp = this._onMouseUp.bind(this);
 
+    // Added for the usability feature.
+    this._onHoverMove = this._onHoverMove.bind(this);
+    this._onHoverLeave = this._onHoverLeave.bind(this);
     this.attach();
   }
 
   attach() {
     this.scrollEl.addEventListener("mousedown", this._onMouseDown);
+    this.scrollEl.addEventListener("mousemove", this._onHoverMove);
+    this.scrollEl.addEventListener("mouseleave", this._onHoverLeave);
   }
 
   detach() {
     if (this.scrollEl) {
       this.scrollEl.removeEventListener("mousedown", this._onMouseDown);
+      this.scrollEl.removeEventListener("mousemove", this._onHoverMove);
+      this.scrollEl.removeEventListener("mouseleave", this._onHoverLeave);
     }
     document.removeEventListener("mousemove", this._onMouseMove);
     document.removeEventListener("mouseup", this._onMouseUp);
@@ -41,15 +51,31 @@ class DeadlineDragCreate {
     this.detach();
     this.scrollEl = scrollEl;
     this.geom = geom;
+    this._hoverLayer = null;
+    this._hoverRing = null;
+    this._lastHover = null;
+    this._onHoverMove = this._onHoverMove.bind(this);
+    this._onHoverLeave = this._onHoverLeave.bind(this);
     this.attach();
   }
 
   // ── Mouse handlers ───────────────────────────────────────────────────────
 
   _onMouseDown(e) {
+    console.log(
+      "[drag] mousedown received",
+      e.clientX,
+      e.clientY,
+      "button:",
+      e.button,
+      "target:",
+      e.target,
+    );
+
     if (e.button !== 0 || this.draft) return;
 
     const anchor = this._hitTestLattice(e);
+    console.log("[drag] hitTest anchor:", anchor);
     if (!anchor) return;
 
     // Don't start a create-drag if the user clicked on an event block or
@@ -64,15 +90,20 @@ class DeadlineDragCreate {
       moved: false,
       layer: this._createGhostLayer(),
     };
-    this._drawGhost();
-
     document.addEventListener("mousemove", this._onMouseMove);
     document.addEventListener("mouseup", this._onMouseUp);
+
+    try {
+      this._drawGhost();
+    } catch (err) {
+      console.error("[drag] ghost draw failed", err);
+    }
   }
 
   _onMouseMove(e) {
     if (!this.draft) return;
     const p = this._hitTestLattice(e);
+    // console.log("[drag] mousemove → lattice point:", p);
     if (!p) return;
 
     const cur = this.draft.current;
@@ -98,17 +129,27 @@ class DeadlineDragCreate {
     }
 
     const [a, b] = this._sortEndpoints(draft.anchor, draft.current);
+    // const start = this._latticeToDate(a);
+    // const due = this._latticeToDate(b);
+
+    const spanned = a.day !== b.day; // a real multi-day drag, not a single click
+
     const start = this._latticeToDate(a);
-    const due = this._latticeToDate(b);
+    const due = this._latticeToDate(spanned ? { ...b, day: b.day - 1 } : b);
 
     this.view.openDeadlineModal(null, { start, due });
   }
 
-  // ── Ghost squiggle ──────────────────────────────────────────────────────
+  // ── Ghost squiggle ───────────────────────────────────────────────────────
 
   _createGhostLayer() {
     const {
-      colW, numDays, slotHeight, totalSlots, dayHeaderHeight, allDayRowHeight,
+      colW,
+      numDays,
+      slotHeight,
+      totalSlots,
+      dayHeaderHeight,
+      allDayRowHeight,
     } = this.geom;
 
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -176,6 +217,91 @@ class DeadlineDragCreate {
     draft.layer.appendChild(g);
   }
 
+  _ensureHoverLayer() {
+    if (this._hoverLayer) return this._hoverLayer;
+
+    const {
+      colW,
+      numDays,
+      slotHeight,
+      totalSlots,
+      dayHeaderHeight,
+      allDayRowHeight,
+    } = this.geom;
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "tl-dl-hover-layer");
+    svg.setAttribute("width", colW * numDays);
+    svg.setAttribute(
+      "height",
+      dayHeaderHeight + allDayRowHeight + slotHeight * totalSlots,
+    );
+    svg.style.position = "absolute";
+    svg.style.left = "0";
+    svg.style.top = "0";
+    svg.style.pointerEvents = "none";
+    svg.style.zIndex = "19"; // below the ghost layer (20), above deadlines (15)
+
+    // Persistent ring element — created once, moved and toggled thereafter.
+    const ring = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "circle",
+    );
+    ring.setAttribute("class", "tl-dl-hover-ring");
+    ring.setAttribute("r", DL.HEAD_R + 2);
+    ring.setAttribute("fill", "none");
+    ring.setAttribute("stroke", "#a0c2c8");
+    ring.setAttribute("stroke-width", 1.5);
+    ring.style.opacity = "0";
+
+    svg.appendChild(ring);
+    this.scrollEl.appendChild(svg);
+
+    this._hoverLayer = svg;
+    this._hoverRing = ring;
+    return svg;
+  }
+
+  // Note: the hover ring lives in its own SVG layer, separate from the ghost layer. The ghost layer is created and destroyed on every drag; the hover layer persists for the lifetime of the drag handler.
+
+  _onHoverMove(e) {
+    if (this.draft) return;
+
+    const p = this._hitTestLattice(e);
+
+    const last = this._lastHover;
+    const same =
+      p &&
+      last &&
+      p.day === last.day &&
+      p.slot === last.slot &&
+      p.allDay === last.allDay;
+
+    if (same) return;
+    if (!p && !last) return;
+
+    this._lastHover = p;
+    this._drawHover(p);
+  }
+
+  _onHoverLeave() {
+    this._lastHover = null;
+    if (this._hoverRing) this._hoverRing.style.opacity = "0";
+  }
+
+  _drawHover(p) {
+    if (!this._hoverRing) this._ensureHoverLayer();
+    if (!this._hoverRing) return;
+    if (!p) {
+      this._hoverRing.style.opacity = "0";
+      return;
+    }
+    const px = this._latticeToPixel(p);
+    this._hoverRing.setAttribute("cx", px.x);
+    this._hoverRing.setAttribute("cy", px.y);
+    this._hoverRing.style.opacity = "0.5";
+  }
+
   // ── Lattice math ────────────────────────────────────────────────────────
 
   /**
@@ -192,8 +318,12 @@ class DeadlineDragCreate {
     const localY = e.clientY - rect.top + scrollTop;
 
     const {
-      colW, numDays, slotHeight, totalSlots,
-      dayHeaderHeight, allDayRowHeight,
+      colW,
+      numDays,
+      slotHeight,
+      totalSlots,
+      dayHeaderHeight,
+      allDayRowHeight,
     } = this.geom;
 
     const HIT = 12;
@@ -228,9 +358,10 @@ class DeadlineDragCreate {
     return null;
   }
 
-  _latticeToPixel(p) {
+  _latticeToPixel(p, role = "start") {
     const { colW, slotHeight, dayHeaderHeight, allDayRowHeight } = this.geom;
     const x = p.day * colW;
+    // const x = role === "due" ? (p.day + 1) * colW : p.day * colW;
     const y = p.allDay
       ? dayHeaderHeight + allDayRowHeight / 2
       : dayHeaderHeight + allDayRowHeight + p.slot * slotHeight;
