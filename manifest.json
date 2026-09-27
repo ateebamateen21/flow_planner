@@ -1,0 +1,10 @@
+{
+  "id": "flow-planner",
+  "name": "Flow Planner",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "A study planner with weekly/monthly timeline. Supports my calendar",
+  "author": "ateebamateen",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}

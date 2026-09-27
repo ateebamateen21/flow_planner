@@ -1,0 +1,16 @@
+{
+  "name": "study-flow-planner",
+  "version": "1.0.0",
+  "description": "A study planner with weekly/monthly timeline.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production && node deploy.mjs",
+    "deploy": "node deploy.mjs"
+  },
+  "devDependencies": {
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.20.0",
+    "obsidian": "latest"
+  }
+}

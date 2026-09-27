@@ -1,0 +1,691 @@
+/* Timeline Calendar Plugin - Obsidian */
+
+.timeline-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+  background: var(--background-primary);
+  font-family: var(--font-interface);
+  font-size: 13px;
+  color: var(--text-normal);
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ── TOOLBAR ── */
+.timeline-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.timeline-toolbar-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-normal);
+}
+.timeline-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.tl-btn {
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  color: var(--text-normal);
+  cursor: pointer;
+  padding: 3px 9px;
+  font-size: 11px;
+  transition: all 0.15s;
+}
+.tl-btn:hover {
+  background: var(--interactive-accent);
+  color: #fff;
+  border-color: var(--interactive-accent);
+}
+.tl-period {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 120px;
+  text-align: center;
+}
+.tl-zoom-group {
+  display: flex;
+  gap: 3px;
+}
+.tl-zbtn {
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.tl-zbtn:hover,
+.tl-zbtn.active {
+  background: var(--interactive-accent);
+  color: #fff;
+  border-color: var(--interactive-accent);
+}
+.tl-add-btn {
+  margin-left: auto;
+  background: var(--interactive-accent);
+  border: none;
+  border-radius: 5px;
+  color: #fff;
+  cursor: pointer;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.tl-add-btn:hover {
+  opacity: 0.85;
+}
+
+/* ── BODY ── */
+.timeline-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── GUTTER ──
+   Largura generosa para mostrar "22:30-23:00" completo (10 chars).
+   O scroll é sincronizado via scrollTop espelhado.
+*/
+.tl-gutter {
+  width: 104px;
+  flex-shrink: 0;
+  border-right: 2px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.tl-gutter-corner {
+  height: 56px; /* igual a --header-h */
+  border-bottom: 2px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+.tl-gutter-allday {
+  height: 32px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 8px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+/* Este wrapper recebe overflow:hidden + altura exata;
+   translateY negativo move o conteúdo para cima sincronizando com scroll */
+.tl-gutter-scroll-mask {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+.tl-gutter-slots {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* altura = TOTAL * SH; calculada pelo JS */
+  will-change: transform;
+}
+.tl-gutter-slot {
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 8px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--background-modifier-border-focus);
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: visible; /* nunca cortar */
+  box-sizing: border-box;
+}
+.tl-gutter-slot.on-hour {
+  color: var(--text-normal);
+  font-weight: 700;
+  border-bottom-color: var(--background-modifier-border);
+}
+
+/* ── SCROLL AREA ── */
+.tl-scroll {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.tl-scroll::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.tl-scroll::-webkit-scrollbar-thumb {
+  background: var(--background-modifier-border);
+  border-radius: 3px;
+}
+
+/* ── DAY HEADERS ── */
+.tl-day-header-row {
+  display: flex;
+  flex-shrink: 0;
+  background: var(--background-secondary);
+  border-bottom: 2px solid var(--background-modifier-border);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.tl-dh {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--background-modifier-border-focus);
+  cursor: pointer;
+  padding: 5px 2px;
+  gap: 2px;
+  transition: background 0.12s;
+  height: 56px;
+}
+.tl-dh:hover {
+  background: var(--background-modifier-hover);
+}
+.tl-dh.today {
+  background: color-mix(in srgb, var(--interactive-accent) 8%, transparent);
+}
+.tl-dh-mo {
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.tl-dh-wd {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.tl-dh-num {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-normal);
+  line-height: 1;
+}
+.tl-dh.weekend .tl-dh-wd,
+.tl-dh.weekend .tl-dh-num {
+  color: var(--text-error);
+}
+.tl-dh.today .tl-dh-num {
+  background: var(--interactive-accent);
+  color: #fff;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+
+/* ── ALL-DAY ROW ── */
+.tl-allday-row {
+  display: flex;
+  flex-shrink: 0;
+  background: var(--background-primary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.tl-allday-cell {
+  flex-shrink: 0;
+  height: 32px;
+  border-right: 1px solid var(--background-modifier-border-focus);
+  cursor: pointer;
+  position: relative;
+  transition: background 0.1s;
+}
+.tl-allday-cell:hover {
+  background: var(--background-modifier-hover);
+}
+.tl-allday-cell.today {
+  background: color-mix(in srgb, var(--interactive-accent) 8%, transparent);
+}
+.tl-allday-ev {
+  position: absolute;
+  top: 3px;
+  left: 2px;
+  right: 2px;
+  height: calc(100% - 6px);
+  border-radius: 3px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* ── GRID ── */
+.tl-grid {
+  flex: 1;
+  display: flex;
+  position: relative;
+}
+.tl-day-col {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--background-modifier-border-focus);
+  position: relative;
+}
+.tl-day-col.today {
+  background: color-mix(in srgb, var(--interactive-accent) 3%, transparent);
+}
+.tl-day-col.weekend {
+  background: color-mix(in srgb, var(--text-error) 2%, transparent);
+}
+.tl-slot {
+  height: 30px;
+  border-bottom: 1px solid var(--background-modifier-border-focus);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.1s;
+  box-sizing: border-box;
+}
+.tl-slot:hover {
+  background: color-mix(in srgb, var(--interactive-accent) 8%, transparent);
+}
+.tl-slot.on-hour {
+  border-bottom-color: var(--background-modifier-border);
+}
+
+/* ── EVENTS ── */
+.tl-ev {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  border-radius: 4px;
+  padding: 2px 5px;
+  font-size: 10px;
+  color: inherit;
+  /* Because JS will set this color */
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  transition: opacity 0.15s;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+}
+.tl-ev:hover {
+  opacity: 0.88;
+}
+.tl-ev.done {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+.tl-ev-title {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+}
+.tl-ev-time {
+  font-size: 9px;
+  opacity: 0.85;
+}
+
+/* ── NOW LINE ── */
+.tl-now-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #e05c5c;
+  z-index: 10;
+  pointer-events: none;
+}
+.tl-now-line::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e05c5c;
+}
+
+/* ── TOOLTIP ── */
+.tl-tip {
+  position: fixed;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 11px;
+  color: var(--text-normal);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  z-index: 9999;
+  pointer-events: none;
+  /* max-width: n; */
+  display: none;
+}
+.tl-tip-title {
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+.tl-tip-meta {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+/* ── MODAL OVERLAY ── */
+.tl-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 200;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.tl-overlay.open {
+  display: flex;
+}
+.tl-modal {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  padding: 24px 26px;
+  width: 500px;
+  max-width: calc(100vw - 40px);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+}
+
+.tl-modal h3 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-normal);
+  margin-bottom: 18px;
+}
+
+.tl-mf {
+  margin-bottom: 14px;
+}
+
+.tl-mf label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  margin-bottom: 5px;
+}
+
+.tl-mf input,
+.tl-mf select,
+.tl-mf textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.tl-mrow {
+  display: flex;
+  gap: 10px;
+}
+
+.tl-mrow .tl-mf {
+  flex: 1;
+}
+
+.tl-crow {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 3px;
+}
+
+.tl-sw {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: transform 0.1s;
+}
+
+.tl-mact {
+  display: flex;
+  gap: 7px;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.tl-mbtn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: none;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tl-mf-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.tl-mf-check input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: var(--interactive-accent);
+}
+
+.tl-mf-check label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ── STUDY MODE BUTTON ── */
+.tl-study-btn {
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.tl-study-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.tl-study-btn.active {
+  background: color-mix(in srgb, #3aaa6e 20%, transparent);
+  border-color: #3aaa6e;
+  color: #3aaa6e;
+}
+
+/* ── STUDY MODE EVENT ── */
+.study-mode .tl-ev-study {
+  border-left: 3px solid rgba(255, 255, 255, 0.5);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.study-mode .tl-ev-study .tl-ev-title {
+  font-size: 11px;
+  font-weight: 800;
+}
+.study-mode .tl-ev-study .tl-ev-time {
+  font-size: 10px;
+  opacity: 0.9;
+}
+
+/* ── NOTE AUTOCOMPLETE SUGGESTIONS ── */
+.tl-note-suggestions {
+  position: relative;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 5px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  z-index: 9999;
+  max-height: 180px;
+  overflow-y: auto;
+  margin-top: 2px;
+}
+.tl-note-suggestion-item {
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--text-normal);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.1s;
+}
+.tl-note-suggestion-item:hover {
+  background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+  color: var(--interactive-accent);
+}
+
+/* Deadline Mode CSS */
+
+/* ── DEADLINE MODE ────────────────────────────────────────────────────── */
+.tl-deadline-btn {
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.tl-deadline-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.tl-deadline-btn.active {
+  background: color-mix(in srgb, #a0c2c8 25%, transparent);
+  border-color: #a0c2c8;
+  color: var(--text-normal);
+}
+
+.tl-add-deadline-btn {
+  background: transparent;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.tl-add-deadline-btn:hover {
+  border-color: var(--interactive-accent);
+  color: var(--interactive-accent);
+}
+
+/* Deadline overlay layer */
+.tl-deadline-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+.tl-deadline-layer g {
+  pointer-events: auto;
+}
+.tl-dl-stroke {
+  transition: stroke-width 0.12s ease;
+}
+.tl-dl-chevron {
+  transition: opacity 0.12s ease;
+}
+.tl-dl-chevron:hover {
+  opacity: 0.6;
+}
+
+/* Due-cap pulse when within 24h */
+@keyframes tl-dl-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  70% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+.tl-dl-pulse {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: tl-dl-pulse 1.6s ease-out infinite;
+}
+
+/* Deadline tooltip inherits .tl-tip; just add a slight accent */
+.tl-dl-tip {
+  border-left: 3px solid #a0c2c8;
+}
+
+/* styles for the editing of deadlines */
+.tl-dl-edit {
+  display: block;
+  margin-top: 8px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--interactive-accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.tl-dl-edit:hover {
+  opacity: 0.85;
+}
