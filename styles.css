@@ -638,7 +638,7 @@
   pointer-events: auto;
 }
 .tl-dl-stroke {
-  transition: stroke-width 0.12s ease;
+  transition: stroke-width 0.21s ease;
 }
 .tl-dl-chevron {
   transition: opacity 0.12s ease;
@@ -688,4 +688,14 @@
 }
 .tl-dl-edit:hover {
   opacity: 0.85;
+}
+
+/* For the drag to create deadline feature */
+.tl-dl-ghost-layer {
+  opacity: 0.5;
+}
+
+/* for usability about when to snap to a point. */
+.tl-dl-hover-ring {
+  transition: opacity 0.15s ease;
 }

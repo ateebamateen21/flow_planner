@@ -2,6 +2,7 @@
 
 const { Plugin, ItemView, Notice } = require("obsidian");
 const { DeadlineLayer, DL, deadlineIsValid } = require("./deadline");
+const { DeadlineDragCreate } = require("./deadline_drag");
 
 const VIEW_TYPE = "timeline-calendar";
 
@@ -422,6 +423,10 @@ class TimelineView extends ItemView {
       document.removeEventListener("mousedown", this._docClickRef);
       this._docClickRef = null;
     }
+    if (this._deadlineDrag) {
+      this._deadlineDrag.detach();
+      this._deadlineDrag = null;
+    }
     await this._saveData();
   }
 
@@ -828,6 +833,24 @@ class TimelineView extends ItemView {
   // ———-—------------------------ Rendering Deadlines -----------------------
   _renderDeadlines(scroll, grid, weekStart) {
     if (!this.state.deadlineMode) return;
+
+    const geom = {
+      colW: this.colW(),
+      numDays: this.state.zoom,
+      weekStart: weekStart,
+      slotHeight: SH,
+      totalSlots: TOTAL,
+      dayHeaderHeight: 56,
+      allDayRowHeight: 32,
+      helpers: { addDays, dateKey, slotToTime },
+    };
+
+    if (!this._deadlineDrag) {
+      this._deadlineDrag = new DeadlineDragCreate(this, scroll, geom);
+    } else {
+      this._deadlineDrag.setGrid(scroll, geom);
+    }
+
     if (!this.state.deadlines.length) return;
 
     const layer = new DeadlineLayer(
@@ -837,11 +860,9 @@ class TimelineView extends ItemView {
       weekStart,
       this.state.zoom,
     );
-    // The grid's real height is TOTAL * SH; SH is 30 in main.js.
     layer.setHeight(TOTAL * 30);
     layer.render(this.state.deadlines);
   }
-
   _showDeadlineTip(e, dl, pin = false) {
     const t = this._t;
 
@@ -951,7 +972,7 @@ class TimelineView extends ItemView {
 
   // Openin deadline modals
 
-  openDeadlineModal(dl) {
+  openDeadlineModal(dl, prefill = null) {
     const t = this._t;
     const isNew = !dl;
     const d = dl
@@ -959,8 +980,8 @@ class TimelineView extends ItemView {
       : {
           id: "dl-" + uid(),
           title: "",
-          due: null,
-          start: null,
+          due: prefill?.due || null,
+          start: prefill?.start || null,
           color: COLORS[0],
           notes: "",
           noteLink: "",

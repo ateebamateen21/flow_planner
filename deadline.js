@@ -472,4 +472,4 @@ function deadlineIsValid(start, due) {
   return s.getTime() <= d.getTime();
 }
 
-module.exports = { DeadlineLayer, DL, deadlineIsValid };
+module.exports = { DeadlineLayer, DL, deadlineIsValid, _squigglePath };
