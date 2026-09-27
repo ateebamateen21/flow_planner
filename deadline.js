@@ -168,8 +168,7 @@ class DeadlineLayer {
     if (endpoint.time) {
       // Match main.js slot math: (h - START_H)*60 + m, /30, *SH.
       const [h, m] = endpoint.time.split(":").map(Number);
-      const slot = Math.floor(((h - 0) * 60 + m) / 30);
-      return slot * 30 + 1; // 30 = SH, +1 to nudge off the border
+      return h * 60 + m; // one minute = one pixel
     }
     return 0; // all-day row top
   }
@@ -210,9 +209,9 @@ class DeadlineLayer {
 
     // Cases ---------------------------------------------------------------
     if (startIdx != null && dueIdx != null) {
-      // Both endpoints exist. Clamp x's to the visible span.
-      let sx = rawX(startIdx);
-      let dx = rawX(dueIdx);
+      // Both endpoints exist.
+      let sx = startX(startIdx); // left edge of start column
+      let dx = dueX(dueIdx); // right edge of due column
       if (sx < 0) {
         sx = 0;
         clipStart = true;
@@ -234,8 +233,8 @@ class DeadlineLayer {
       x2 = dx;
       y2 = this._yFor(dl.due);
     } else if (startIdx != null) {
-      // Start only. Line runs from start to right edge of start column.
-      let sx = rawX(startIdx);
+      // Start only. Line runs from left edge of start column to its right edge.
+      let sx = startX(startIdx);
       if (sx < 0) {
         sx = 0;
         clipStart = true;
@@ -246,15 +245,15 @@ class DeadlineLayer {
       }
       x1 = sx;
       y1 = this._yFor(dl.start);
-      x2 = sx + this.colW / 2;
+      x2 = sx + this.colW; // right edge of same column
       y2 = y1;
       if (x2 > this.width) {
         x2 = this.width;
         clipDue = true;
       }
     } else if (dueIdx != null) {
-      // Due only. Line runs from left edge of due column to due.
-      let dx = rawX(dueIdx);
+      // Due only. Line runs from left edge of due column to its right edge.
+      let dx = dueX(dueIdx);
       if (dx < 0) {
         dx = 0;
         clipDue = true;
@@ -265,14 +264,14 @@ class DeadlineLayer {
       }
       x2 = dx;
       y2 = this._yFor(dl.due);
-      x1 = dx - this.colW / 2;
+      x1 = dx - this.colW; // left edge of same column
       y1 = y2;
       if (x1 < 0) {
         x1 = 0;
         clipStart = true;
       }
     } else {
-      return; // nothing to draw
+      return;
     }
 
     // Overdue ring check (only when due exists and is in the past).
@@ -464,7 +463,6 @@ class DeadlineLayer {
     g.appendChild(c);
   }
 }
-
 
 // Is this deadline valid? e.g; don't let the users create a deadline where due date comes before start date (that would be a disaster lmao)
 function deadlineIsValid(start, due) {
