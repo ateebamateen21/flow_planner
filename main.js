@@ -1092,6 +1092,11 @@ class TimelineView extends ItemView {
       text: isNew ? t.btnCreate : t.btnSave,
     });
     saveBtn.onclick = () => {
+      // Clear any red borders from a previous failed attempt.
+      [inputTitle, startDate, startTime, dueDate, dueTime].forEach((el) => {
+        el.style.borderColor = "";
+      });
+
       const title = inputTitle.value.trim();
       const due = dueDate.value
         ? { date: dueDate.value, time: dueTime.value || null }
@@ -1109,8 +1114,13 @@ class TimelineView extends ItemView {
         startDate.style.borderColor = "#c0392b";
         return;
       }
-      if(due && start){
-        deadlineIsValid()
+      if (due && start && !deadlineIsValid(start, due)) {
+        startDate.style.borderColor = "#c0392b";
+        startTime.style.borderColor = "#c0392b";
+        dueDate.style.borderColor = "#c0392b";
+        dueTime.style.borderColor = "#c0392b";
+        new Notice("Start can't be after the due date.");
+        return;
       }
 
       d.title = title;
