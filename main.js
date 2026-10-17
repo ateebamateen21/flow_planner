@@ -6,6 +6,16 @@ const { DeadlineDragCreate } = require("./deadline_drag");
 
 const VIEW_TYPE = "timeline-calendar";
 
+// Saved data that every planner view shares through the plugin.
+const SHARED_KEYS = [
+  "events",
+  "deadlines",
+  "studyMode",
+  "taskMode",
+  "conceptMode",
+  "deadlineMode",
+];
+
 // ─── i18n ─────────────────────────────────────────────────────────────────
 const STRINGS = {
   pt: {
@@ -321,21 +331,27 @@ function slotEndTime(i) {
 
 // ─── VIEW ─────────────────────────────────────────────────────────────────────
 
-class TimelineView extends ItemView {
-  constructor(leaf, plugin) {
-    super(leaf);
+// The planner itself. It knows nothing about tabs: it draws into whatever
+// container element it is mounted into, so a tab or a Bases view can host it.
+class Planner {
+  constructor(plugin) {
     this.plugin = plugin;
     this.state = {
       zoom: 7,
       offset: 0,
-      events: [], // user-created events (persisted)
       noteEvents: [], // auto-detected from notes (never persisted)
-      studyMode: false,
-      taskMode: false,
-      conceptMode: false,
-      deadlines: [],
-      deadlineMode: false,
     };
+    // events, deadlines and the mode flags live on the plugin, so every
+    // planner view reads and writes the same copy.
+    for (const key of SHARED_KEYS) {
+      Object.defineProperty(this.state, key, {
+        get: () => this.plugin.data[key],
+        set: (v) => {
+          this.plugin.data[key] = v;
+        },
+        enumerable: true,
+      });
+    }
     this._tip = null;
     this._deadlineTip = null;
     this._deadlineTipPinned = false;
@@ -347,16 +363,6 @@ class TimelineView extends ItemView {
     this._vaultRefs = [];
     this._taskStateCache = new Map();
     this._conceptStateCache = new Map();
-  }
-
-  getViewType() {
-    return VIEW_TYPE;
-  }
-  getDisplayText() {
-    return this._t ? this._t.viewTitle : "Timeline";
-  }
-  getIcon() {
-    return "calendar-days";
   }
 
   get _t() {
@@ -380,7 +386,7 @@ class TimelineView extends ItemView {
     return brightness > 160 ? "#000" : "#fff";
   }
 
-  async onOpen() {
+  async mount(container) {
     this._lang = detectLang();
 
     await this._loadData();
@@ -392,7 +398,7 @@ class TimelineView extends ItemView {
       await this._refreshConceptStates();
     }
 
-    const container = this.containerEl.children[1];
+    this.container = container;
     container.empty();
     container.style.padding = "0";
     container.style.overflow = "hidden";
@@ -417,7 +423,7 @@ class TimelineView extends ItemView {
     this.render();
   }
 
-  async onClose() {
+  async unmount() {
     this._unregisterVaultListeners();
     if (this._docClickRef) {
       document.removeEventListener("mousedown", this._docClickRef);
@@ -445,18 +451,11 @@ class TimelineView extends ItemView {
   // }
 
   async _loadData() {
-    const saved = await this.plugin.loadData();
-    if (saved && Array.isArray(saved.events) && saved.events.length > 0) {
-      this.state.events = saved.events;
-    } else {
+    // The plugin already holds the data; only fill in the sample events
+    // on a first run, as before.
+    if (!this.state.events.length) {
       this.state.events = this._sampleEvents();
     }
-    this.state.deadlines =
-      saved && Array.isArray(saved.deadlines) ? saved.deadlines : [];
-    this.state.studyMode = saved && saved.studyMode === true;
-    this.state.taskMode = saved && saved.taskMode === true;
-    this.state.conceptMode = saved && saved.conceptMode === true;
-    this.state.deadlineMode = saved && saved.deadlineMode === true;
   }
 
   // async _saveData() {
@@ -470,14 +469,7 @@ class TimelineView extends ItemView {
   // }
 
   async _saveData() {
-    await this.plugin.saveData({
-      events: this.state.events,
-      deadlines: this.state.deadlines,
-      studyMode: this.state.studyMode,
-      taskMode: this.state.taskMode,
-      conceptMode: this.state.conceptMode,
-      deadlineMode: this.state.deadlineMode,
-    });
+    await this.plugin.saveAll();
   }
 
   _sampleEvents() {
@@ -840,15 +832,23 @@ class TimelineView extends ItemView {
       weekStart: weekStart,
       slotHeight: SH,
       totalSlots: TOTAL,
-      dayHeaderHeight: 56,
-      allDayRowHeight: 32,
       helpers: { addDays, dateKey, slotToTime },
     };
 
+    // The all-day row sits just above the grid. The drag code measures both
+    // elements instead of assuming fixed heights.
+    const allDayEl = scroll.querySelector(".tl-allday-row");
+
     if (!this._deadlineDrag) {
-      this._deadlineDrag = new DeadlineDragCreate(this, scroll, geom);
+      this._deadlineDrag = new DeadlineDragCreate(
+        this,
+        scroll,
+        grid,
+        allDayEl,
+        geom,
+      );
     } else {
-      this._deadlineDrag.setGrid(scroll, geom);
+      this._deadlineDrag.setGrid(scroll, grid, allDayEl, geom);
     }
 
     if (!this.state.deadlines.length) return;
@@ -1987,8 +1987,51 @@ class TimelineView extends ItemView {
 
 // ─── PLUGIN ───────────────────────────────────────────────────────────────────
 
+// The tab: a thin wrapper that hands the planner its container.
+class TimelineView extends ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.planner = new Planner(plugin);
+  }
+
+  getViewType() {
+    return VIEW_TYPE;
+  }
+  getDisplayText() {
+    return this.planner._t.viewTitle;
+  }
+  getIcon() {
+    return "calendar-days";
+  }
+
+  async onOpen() {
+    await this.planner.mount(this.containerEl.children[1]);
+  }
+
+  async onClose() {
+    await this.planner.unmount();
+  }
+}
+
 class TimelinePlugin extends Plugin {
+  async loadAll() {
+    const saved = (await this.loadData()) || {};
+    this.data = {
+      events: Array.isArray(saved.events) ? saved.events : [],
+      deadlines: Array.isArray(saved.deadlines) ? saved.deadlines : [],
+      studyMode: saved.studyMode === true,
+      taskMode: saved.taskMode === true,
+      conceptMode: saved.conceptMode === true,
+      deadlineMode: saved.deadlineMode === true,
+    };
+  }
+
+  async saveAll() {
+    await this.saveData(this.data);
+  }
+
   async onload() {
+    await this.loadAll();
     this.registerView(VIEW_TYPE, (leaf) => new TimelineView(leaf, this));
 
     const lang = detectLang();

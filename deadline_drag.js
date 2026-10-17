@@ -12,9 +12,11 @@
 const { DL, _squigglePath } = require("./deadline");
 
 class DeadlineDragCreate {
-  constructor(view, scrollEl, geom) {
+  constructor(view, scrollEl, gridEl, allDayEl, geom) {
     this.view = view;
-    this.scrollEl = scrollEl;
+    this.scrollEl = scrollEl; // receives the mouse (the all-day row is outside the grid)
+    this.gridEl = gridEl; // origin of all coordinates; also hosts the SVG sheets
+    this.allDayEl = allDayEl; // measured, never assumed
     this.geom = geom;
     this.draft = null;
     this._hoverLayer = null; // persistent SVG for the hover ring
@@ -47,9 +49,11 @@ class DeadlineDragCreate {
     document.removeEventListener("mouseup", this._onMouseUp);
   }
 
-  setGrid(scrollEl, geom) {
+  setGrid(scrollEl, gridEl, allDayEl, geom) {
     this.detach();
     this.scrollEl = scrollEl;
+    this.gridEl = gridEl;
+    this.allDayEl = allDayEl;
     this.geom = geom;
     this._hoverLayer = null;
     this._hoverRing = null;
@@ -142,31 +146,32 @@ class DeadlineDragCreate {
 
   // ── Ghost squiggle ───────────────────────────────────────────────────────
 
-  _createGhostLayer() {
-    const {
-      colW,
-      numDays,
-      slotHeight,
-      totalSlots,
-      dayHeaderHeight,
-      allDayRowHeight,
-    } = this.geom;
-
+  // A transparent SVG sheet inside the grid whose (0, 0) is the grid's
+  // top-left corner: the same padding trick as DeadlineLayer.render(), so
+  // ghost, hover ring and saved deadlines all share one origin.
+  _makeSheet(className, zIndex) {
+    const PAD = 32;
+    const w = this.geom.colW * this.geom.numDays;
+    const h = this.geom.slotHeight * this.geom.totalSlots;
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("class", "tl-dl-ghost-layer");
-    svg.setAttribute("width", colW * numDays);
+    svg.setAttribute("class", className);
+    svg.setAttribute("width", w + 2 * PAD);
+    svg.setAttribute("height", h + 2 * PAD);
     svg.setAttribute(
-      "height",
-      dayHeaderHeight + allDayRowHeight + slotHeight * totalSlots,
+      "viewBox",
+      `${-PAD} ${-PAD} ${w + 2 * PAD} ${h + 2 * PAD}`,
     );
     svg.style.position = "absolute";
-    svg.style.left = "0";
-    svg.style.top = "0";
+    svg.style.left = `${-PAD}px`;
+    svg.style.top = `${-PAD}px`;
     svg.style.pointerEvents = "none";
-    svg.style.zIndex = "20";
-
-    this.scrollEl.appendChild(svg);
+    svg.style.zIndex = zIndex; // below the sticky day header (20)
+    this.gridEl.appendChild(svg);
     return svg;
+  }
+
+  _createGhostLayer() {
+    return this._makeSheet("tl-dl-ghost-layer", 18);
   }
 
   _drawGhost() {
@@ -220,27 +225,7 @@ class DeadlineDragCreate {
   _ensureHoverLayer() {
     if (this._hoverLayer) return this._hoverLayer;
 
-    const {
-      colW,
-      numDays,
-      slotHeight,
-      totalSlots,
-      dayHeaderHeight,
-      allDayRowHeight,
-    } = this.geom;
-
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("class", "tl-dl-hover-layer");
-    svg.setAttribute("width", colW * numDays);
-    svg.setAttribute(
-      "height",
-      dayHeaderHeight + allDayRowHeight + slotHeight * totalSlots,
-    );
-    svg.style.position = "absolute";
-    svg.style.left = "0";
-    svg.style.top = "0";
-    svg.style.pointerEvents = "none";
-    svg.style.zIndex = "19"; // below the ghost layer (20), above deadlines (15)
+    const svg = this._makeSheet("tl-dl-hover-layer", 17);
 
     // Persistent ring element — created once, moved and toggled thereafter.
     const ring = document.createElementNS(
@@ -255,7 +240,6 @@ class DeadlineDragCreate {
     ring.style.opacity = "0";
 
     svg.appendChild(ring);
-    this.scrollEl.appendChild(svg);
 
     this._hoverLayer = svg;
     this._hoverRing = ring;
@@ -311,25 +295,25 @@ class DeadlineDragCreate {
    * Lattice point shape: { day: int, slot: int|null, allDay: bool }
    */
   _hitTestLattice(e) {
-    const rect = this.scrollEl.getBoundingClientRect();
-    const scrollTop = this.scrollEl.scrollTop;
-
+    // Measure against the grid element. Its on-screen position already
+    // moves with scrolling in both directions, so no scrollTop/scrollLeft
+    // and no assumed header heights are needed.
+    const rect = this.gridEl.getBoundingClientRect();
     const localX = e.clientX - rect.left;
-    const localY = e.clientY - rect.top + scrollTop;
+    const localY = e.clientY - rect.top;
 
-    const {
-      colW,
-      numDays,
-      slotHeight,
-      totalSlots,
-      dayHeaderHeight,
-      allDayRowHeight,
-    } = this.geom;
+    const { colW, numDays, slotHeight, totalSlots } = this.geom;
 
     const HIT = 12;
-    const allDayTop = dayHeaderHeight;
-    const allDayBottom = dayHeaderHeight + allDayRowHeight;
-    const gridTop = allDayBottom;
+
+    // The all-day row's extent, in the same grid-relative coordinates.
+    let allDayTop = 0;
+    let allDayBottom = 0;
+    if (this.allDayEl) {
+      const ar = this.allDayEl.getBoundingClientRect();
+      allDayTop = ar.top - rect.top;
+      allDayBottom = ar.bottom - rect.top;
+    }
 
     // Nearest column boundary. Boundaries are at x = 0, colW, 2*colW, ...
     const dayIdx = Math.round(localX / colW);
@@ -343,8 +327,8 @@ class DeadlineDragCreate {
     }
 
     // Grid area?
-    if (localY >= gridTop && localY < gridTop + slotHeight * totalSlots) {
-      const relY = localY - gridTop;
+    if (localY >= 0 && localY < slotHeight * totalSlots) {
+      const relY = localY;
       const slotIdx = Math.round(relY / slotHeight);
       if (slotIdx < 0 || slotIdx > totalSlots) return null;
       const slotY = slotIdx * slotHeight;
@@ -359,12 +343,11 @@ class DeadlineDragCreate {
   }
 
   _latticeToPixel(p, role = "start") {
-    const { colW, slotHeight, dayHeaderHeight, allDayRowHeight } = this.geom;
+    const { colW, slotHeight } = this.geom;
     const x = p.day * colW;
     // const x = role === "due" ? (p.day + 1) * colW : p.day * colW;
-    const y = p.allDay
-      ? dayHeaderHeight + allDayRowHeight / 2
-      : dayHeaderHeight + allDayRowHeight + p.slot * slotHeight;
+    // Same convention as the saved deadlines (DeadlineLayer._yFor).
+    const y = p.allDay ? DL.ALL_DAY_Y : p.slot * slotHeight;
     return { x, y };
   }
 

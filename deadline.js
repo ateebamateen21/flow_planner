@@ -27,6 +27,7 @@ const DL = {
   GLOW_MS: 24 * 3600 * 1000, // glow the due cap when <= 24h remain
   CHEVRON_SIZE: 9,
   CHEVRON_GAP: 4,
+  ALL_DAY_Y: -16, // y of an all-day endpoint, measured from the top of the grid
 };
 
 function _svgEl(tag, attrs) {
@@ -174,7 +175,7 @@ class DeadlineLayer {
     }
 
     // return 0 //this was clipping our deadline squiggles from the top so—
-    return -16; // all-day row top
+    return DL.ALL_DAY_Y; // all-day row
   }
 
   _renderOne(svg, dl, byDueDay, today) {
@@ -329,8 +330,9 @@ class DeadlineLayer {
         .get(dl.due.date)
         .filter((other) => Math.abs(this._yFor(other.due) - myY) <= CLOSE_PX);
       const i = group.indexOf(dl);
-      headOffset =
-        i >= 0 ? (i % 2 === 0 ? -1 : 1) * Math.ceil((i + 1) / 2) * 3 : 0;
+      // The first deadline stays exactly on the grid line. Others that sit
+      // close to it are nudged alternately right and left (+3, -3, +6, ...).
+      headOffset = i > 0 ? (i % 2 === 1 ? 1 : -1) * Math.ceil(i / 2) * 3 : 0;
     }
     if (dl.due && dl.due.date) {
       x2 += headOffset;
