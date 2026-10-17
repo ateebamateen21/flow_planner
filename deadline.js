@@ -72,26 +72,28 @@ function _squigglePath(x1, y1, x2, y2, straight) {
 
   if (straight) return `M ${x1} ${y1} L ${x2} ${y2}`;
 
-  // Build a sine wave along the line.
-  const half = DL.WAVELENGTH / 2;
-  const steps = Math.max(2, Math.floor(len / half));
+  // A true sine wave along the line, drawn as one cubic Bezier per half-wave.
+  // The wave starts and ends exactly on the two endpoints (amplitude 0 there),
+  // so the circles sit on the centre line, and neighbouring half-waves meet
+  // with the same tangent, so there are no corners.
+  // The number of half-waves is a whole number, so the real wavelength is
+  // DL.WAVELENGTH stretched or squeezed by a few percent to fit the length.
+  const halves = Math.max(2, Math.round(len / (DL.WAVELENGTH / 2)));
+  const L = len / halves; // length of one half-wave
+  // Control points of a cubic that matches sin() over one half-wave:
+  // they sit 0.4244 of the way in from each end, at 4/3 of the amplitude.
+  const K = 4 / (3 * Math.PI);
+  const H = (DL.AMPLITUDE * 4) / 3;
+  const pt = (s, a) =>
+    `${(x1 + ux * s + px * a).toFixed(2)} ${(y1 + uy * s + py * a).toFixed(2)}`;
+
   let d = `M ${x1} ${y1}`;
-  for (let i = 1; i <= steps; i++) {
-    const t = i / steps;
-    const cx = x1 + dx * t;
-    const cy = y1 + dy * t;
-    // Amplitude alternates sign per half-wavelength.
-    const sign = i % 2 === 0 ? -1 : 1;
-    const off = sign * DL.AMPLITUDE;
-    const nx = cx + px * off;
-    const ny = cy + py * off;
-    // Quadratic control point pulls the curve toward the perpendicular.
-    const qx = cx + px * off * 2;
-    const qy = cy + py * off * 2;
-    d += ` Q ${qx.toFixed(2)} ${qy.toFixed(2)} ${nx.toFixed(2)} ${ny.toFixed(2)}`;
+  for (let k = 0; k < halves; k++) {
+    const a = k % 2 === 0 ? H : -H;
+    const s0 = k * L;
+    const end = k === halves - 1 ? `${x2} ${y2}` : pt(s0 + L, 0);
+    d += ` C ${pt(s0 + L * K, a)} ${pt(s0 + L * (1 - K), a)} ${end}`;
   }
-  // Finish at the exact endpoint.
-  d += ` L ${x2} ${y2}`;
   return d;
 }
 
