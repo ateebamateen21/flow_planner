@@ -148,8 +148,16 @@ class DeadlineLayer {
       if (!byDueDay.has(k)) byDueDay.set(k, []);
       byDueDay.get(k).push(dl);
     });
+    const byStartDay = new Map();
+    deadlines.forEach((dl) => {
+      if (!dl.start || !dl.start.date) return;
+      const k = dl.start.date;
+      if (!byStartDay.has(k)) byStartDay.set(k, []);
+      byStartDay.get(k).push(dl);
+    });
 
-    this._dueY = this._spreadDueHeads(byDueDay);
+    this._dueY = this._spreadHeads(byDueDay, "due");
+    this._startY = this._spreadHeads(byStartDay, "start");
 
     deadlines.forEach((dl) => {
       try {
@@ -163,17 +171,18 @@ class DeadlineLayer {
     this.host.appendChild(svg);
   }
 
-  // Where each due head should sit vertically. A deadline on its own stays
-  // exactly on its time. Heads that would overlap on the same day are pushed
-  // apart by at least DL.STACK_GAP: timed ones stack downward (the first one
-  // stays put), all-day ones spread out symmetrically inside the all-day row.
-  _spreadDueHeads(byDueDay) {
+  // Where each head (the "due" or the "start" end of a deadline) should sit
+  // vertically. A deadline on its own stays exactly on its time. Heads that
+  // would overlap on the same day are pushed apart by at least DL.STACK_GAP:
+  // timed ones stack downward (the first one stays put), all-day ones spread
+  // out symmetrically inside the all-day row.
+  _spreadHeads(byDay, key) {
     const out = new Map();
-    byDueDay.forEach((list) => {
-      const allDay = list.filter((d) => !d.due.time);
+    byDay.forEach((list) => {
+      const allDay = list.filter((d) => !d[key].time);
       const timed = list
-        .filter((d) => d.due.time)
-        .map((d) => ({ d, y: this._yFor(d.due) }))
+        .filter((d) => d[key].time)
+        .map((d) => ({ d, y: this._yFor(d[key]) }))
         .sort((a, b) => a.y - b.y); // stable: ties keep their list order
 
       let prev = -Infinity;
@@ -356,12 +365,23 @@ class DeadlineLayer {
       if (dd && _daysBetween(dd, today) > DL.CAP_DAYS) return;
     }
 
-    // Spread overlapping due heads apart vertically. A due-only tail moves
-    // with its head so it stays horizontal.
-    if (dl.due && dl.due.date && this._dueY && this._dueY.has(dl)) {
-      const dy = this._dueY.get(dl) - this._yFor(dl.due);
-      y2 += dy;
-      if (startIdx == null) y1 += dy;
+    // Spread overlapping heads apart vertically. Each end moves only if it
+    // collides with another deadline's end on its own day, so two squiggles
+    // that share both ends end up parallel and separately clickable. A tail
+    // with a single end moves as a whole, so it stays horizontal.
+    const dyOf = (map, ep) =>
+      ep && ep.date && map && map.has(dl) ? map.get(dl) - this._yFor(ep) : 0;
+    const dyStart = dyOf(this._startY, dl.start);
+    const dyDue = dyOf(this._dueY, dl.due);
+    if (startIdx != null && dueIdx != null) {
+      y1 += dyStart;
+      y2 += dyDue;
+    } else if (dueIdx != null) {
+      y1 += dyDue;
+      y2 += dyDue;
+    } else {
+      y1 += dyStart;
+      y2 += dyStart;
     }
 
     // ── Path ──
