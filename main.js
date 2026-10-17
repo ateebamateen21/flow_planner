@@ -3,6 +3,7 @@
 const { Plugin, ItemView, Notice } = require("obsidian");
 const { DeadlineLayer, DL, deadlineIsValid } = require("./deadline");
 const { DeadlineDragCreate } = require("./deadline_drag");
+const { registerPlannerBasesView } = require("./bases_view");
 
 const VIEW_TYPE = "timeline-calendar";
 
@@ -336,6 +337,9 @@ function slotEndTime(i) {
 class Planner {
   constructor(plugin) {
     this.plugin = plugin;
+    // Deadlines fed in by a Bases view. Never saved to data.json.
+    this.baseDeadlines = [];
+    this.showManualDeadlines = true;
     this.state = {
       zoom: 7,
       offset: 0,
@@ -823,6 +827,23 @@ class Planner {
     this._scroll.onscroll = () => this._syncGutter();
   }
   // ———-—------------------------ Rendering Deadlines -----------------------
+  // A Bases view hands over the deadlines built from its rows.
+  setBaseDeadlines(list, opts = {}) {
+    const showManual = opts.showManual !== false;
+    const unchanged =
+      showManual === this.showManualDeadlines &&
+      JSON.stringify(list) === JSON.stringify(this.baseDeadlines);
+    this.baseDeadlines = list;
+    this.showManualDeadlines = showManual;
+    if (!unchanged && this.root) this.render();
+  }
+
+  // Hand-made deadlines (saved) plus the ones fed in from a base.
+  _visibleDeadlines() {
+    const own = this.showManualDeadlines ? this.state.deadlines : [];
+    return own.concat(this.baseDeadlines);
+  }
+
   _renderDeadlines(scroll, grid, weekStart) {
     if (!this.state.deadlineMode) return;
 
@@ -851,7 +872,8 @@ class Planner {
       this._deadlineDrag.setGrid(scroll, grid, allDayEl, geom);
     }
 
-    if (!this.state.deadlines.length) return;
+    const deadlines = this._visibleDeadlines();
+    if (!deadlines.length) return;
 
     const layer = new DeadlineLayer(
       this,
@@ -861,7 +883,7 @@ class Planner {
       this.state.zoom,
     );
     layer.setHeight(TOTAL * 30);
-    layer.render(this.state.deadlines);
+    layer.render(deadlines);
   }
   _showDeadlineTip(e, dl, pin = false) {
     const t = this._t;
@@ -973,6 +995,13 @@ class Planner {
   // Openin deadline modals
 
   openDeadlineModal(dl, prefill = null) {
+    // Deadlines that come from a base are edited in their note, not here.
+    if (dl && dl.source === "base") {
+      if (dl.noteLink) {
+        this.plugin.app.workspace.openLinkText(dl.noteLink, "", false);
+      }
+      return;
+    }
     const t = this._t;
     const isNew = !dl;
     const d = dl
@@ -2033,6 +2062,8 @@ class TimelinePlugin extends Plugin {
   async onload() {
     await this.loadAll();
     this.registerView(VIEW_TYPE, (leaf) => new TimelineView(leaf, this));
+    // Also available as a view type inside any base (Obsidian 1.10+).
+    registerPlannerBasesView(this, Planner);
 
     const lang = detectLang();
     const t = STRINGS[lang];
