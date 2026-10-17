@@ -197,6 +197,9 @@ class DeadlineLayer {
       )
         return;
     }
+    // Single-endpoint deadline whose only endpoint is off-screen: nothing to draw.
+    if (startIdx == null && dueOff) return;
+    if (dueIdx == null && startOff) return;
 
     // Determine x for each endpoint. If day is off-screen, clamp to edge
     // and mark that side as clipped.
