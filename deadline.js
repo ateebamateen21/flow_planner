@@ -28,6 +28,8 @@ const DL = {
   CHEVRON_SIZE: 9,
   CHEVRON_GAP: 4,
   ALL_DAY_Y: -16, // y of an all-day endpoint, measured from the top of the grid
+  STACK_GAP: 10, // min vertical px between due heads that share a day
+  ALL_DAY_SPREAD: 11, // half-height (px) usable for stacking in the all-day row
 };
 
 function _svgEl(tag, attrs) {
@@ -137,9 +139,8 @@ class DeadlineLayer {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Group deadlines by horizontal offset bucket to nudge overlapping
-    // heads apart. Cheap approach: for each deadline, look at ones whose
-    // due day matches and shift by index * 4px.
+    // Group deadlines by due day. Heads that would overlap are then spread
+    // apart vertically (see _spreadDueHeads), never sideways.
     const byDueDay = new Map();
     deadlines.forEach((dl) => {
       if (!dl.due || !dl.due.date) return;
@@ -147,6 +148,8 @@ class DeadlineLayer {
       if (!byDueDay.has(k)) byDueDay.set(k, []);
       byDueDay.get(k).push(dl);
     });
+
+    this._dueY = this._spreadDueHeads(byDueDay);
 
     deadlines.forEach((dl) => {
       try {
@@ -158,6 +161,38 @@ class DeadlineLayer {
 
     this.host.style.position = this.host.style.position || "relative";
     this.host.appendChild(svg);
+  }
+
+  // Where each due head should sit vertically. A deadline on its own stays
+  // exactly on its time. Heads that would overlap on the same day are pushed
+  // apart by at least DL.STACK_GAP: timed ones stack downward (the first one
+  // stays put), all-day ones spread out symmetrically inside the all-day row.
+  _spreadDueHeads(byDueDay) {
+    const out = new Map();
+    byDueDay.forEach((list) => {
+      const allDay = list.filter((d) => !d.due.time);
+      const timed = list
+        .filter((d) => d.due.time)
+        .map((d) => ({ d, y: this._yFor(d.due) }))
+        .sort((a, b) => a.y - b.y); // stable: ties keep their list order
+
+      let prev = -Infinity;
+      timed.forEach(({ d, y }) => {
+        const adj = Math.max(y, prev + DL.STACK_GAP);
+        out.set(d, adj);
+        prev = adj;
+      });
+
+      if (allDay.length > 1) {
+        const step = Math.min(
+          DL.STACK_GAP,
+          (2 * DL.ALL_DAY_SPREAD) / (allDay.length - 1),
+        );
+        const top = DL.ALL_DAY_Y - (step * (allDay.length - 1)) / 2;
+        allDay.forEach((d, i) => out.set(d, top + i * step));
+      }
+    });
+    return out;
   }
 
   _dayIndex(dateStr) {
@@ -321,21 +356,12 @@ class DeadlineLayer {
       if (dd && _daysBetween(dd, today) > DL.CAP_DAYS) return;
     }
 
-    // Offset overlapping heads on the same due day.
-    let headOffset = 0;
-    if (dl.due && dl.due.date && byDueDay.has(dl.due.date)) {
-      const myY = this._yFor(dl.due);
-      const CLOSE_PX = 20; // roughly one line-height in your current SH/scale
-      const group = byDueDay
-        .get(dl.due.date)
-        .filter((other) => Math.abs(this._yFor(other.due) - myY) <= CLOSE_PX);
-      const i = group.indexOf(dl);
-      // The first deadline stays exactly on the grid line. Others that sit
-      // close to it are nudged alternately right and left (+3, -3, +6, ...).
-      headOffset = i > 0 ? (i % 2 === 1 ? 1 : -1) * Math.ceil(i / 2) * 3 : 0;
-    }
-    if (dl.due && dl.due.date) {
-      x2 += headOffset;
+    // Spread overlapping due heads apart vertically. A due-only tail moves
+    // with its head so it stays horizontal.
+    if (dl.due && dl.due.date && this._dueY && this._dueY.has(dl)) {
+      const dy = this._dueY.get(dl) - this._yFor(dl.due);
+      y2 += dy;
+      if (startIdx == null) y1 += dy;
     }
 
     // ── Path ──
