@@ -641,7 +641,9 @@
   pointer-events: auto;
 }
 .tl-dl-stroke {
-  transition: stroke-width 0.21s ease;
+  transition: stroke-width 0.31s ease;
+  /* border: 1px solid black; */ 
+  /* border doesn't work on SVG elements. */
 }
 .tl-dl-chevron {
   transition: opacity 0.12s ease;
@@ -703,7 +705,6 @@
   transition: opacity 0.15s ease;
 }
 
-
 /* ---- Flow Planner as a Bases view ---- */
 .flow-planner-bases-host {
   position: relative;
@@ -733,12 +734,13 @@
   z-index: 30;
 }
 
-
 /* squiggles circle bigger */
 circle.tl-dl-cap-due {
   transition: r 200ms ease;
+  border: 1px solid black;
 }
 
 circle.tl-dl-cap-due:hover {
   r: 10;
 }
+

@@ -337,9 +337,12 @@ function slotEndTime(i) {
 class Planner {
   constructor(plugin) {
     this.plugin = plugin;
-    // Deadlines fed in by a Bases view. Never saved to data.json.
+    // Set by a Bases view that hosts this planner. In that mode the base is
+    // the only source of deadlines, and new ones become notes (see
+    // bases_view.js) instead of entries in data.json.
+    this.baseOnly = false;
     this.baseDeadlines = [];
-    this.showManualDeadlines = true;
+    this.createDeadline = null;
     this.state = {
       zoom: 7,
       offset: 0,
@@ -828,20 +831,16 @@ class Planner {
   }
   // ———-—------------------------ Rendering Deadlines -----------------------
   // A Bases view hands over the deadlines built from its rows.
-  setBaseDeadlines(list, opts = {}) {
-    const showManual = opts.showManual !== false;
-    const unchanged =
-      showManual === this.showManualDeadlines &&
-      JSON.stringify(list) === JSON.stringify(this.baseDeadlines);
+  setBaseDeadlines(list) {
+    if (JSON.stringify(list) === JSON.stringify(this.baseDeadlines)) return;
     this.baseDeadlines = list;
-    this.showManualDeadlines = showManual;
-    if (!unchanged && this.root) this.render();
+    if (this.root) this.render();
   }
 
-  // Hand-made deadlines (saved) plus the ones fed in from a base.
+  // Inside a Bases view only the base's deadlines are shown; the standalone
+  // tab keeps showing the ones saved in data.json.
   _visibleDeadlines() {
-    const own = this.showManualDeadlines ? this.state.deadlines : [];
-    return own.concat(this.baseDeadlines);
+    return this.baseOnly ? this.baseDeadlines : this.state.deadlines;
   }
 
   _renderDeadlines(scroll, grid, weekStart) {
@@ -1004,6 +1003,8 @@ class Planner {
     }
     const t = this._t;
     const isNew = !dl;
+    // Inside a Bases view a new deadline is created as a note.
+    const toNote = isNew && typeof this.createDeadline === "function";
     const d = dl
       ? JSON.parse(JSON.stringify(dl))
       : {
@@ -1065,6 +1066,7 @@ class Planner {
     const inputNotes = mfNotes.createEl("textarea");
     inputNotes.rows = 2;
     inputNotes.value = d.notes || "";
+    if (toNote) mfNotes.style.display = "none"; // not carried into the note
 
     // Note link
     const mfNote = modal.createDiv({ cls: "tl-mf" });
@@ -1074,10 +1076,11 @@ class Planner {
       placeholder: t.placeholderNote,
     });
     inputNote.value = d.noteLink || "";
+    if (toNote) mfNote.style.display = "none"; // the note is the link
 
     // Tags
     const mfTags = modal.createDiv({ cls: "tl-mf" });
-    mfTags.createEl("label", { text: t.fieldTags });
+    mfTags.createEl("label", { text: toNote ? "Course" : t.fieldTags });
     const inputTags = mfTags.createEl("input", {
       type: "text",
       placeholder: t.placeholderTags,
@@ -1086,6 +1089,7 @@ class Planner {
 
     // Color
     const mfColor = modal.createDiv({ cls: "tl-mf" });
+    if (toNote) mfColor.style.display = "none"; // colour follows the course
     mfColor.createEl("label", { text: t.fieldColor });
     const crow = mfColor.createDiv({ cls: "tl-crow" });
     COLORS.forEach((c) => {
@@ -1170,6 +1174,17 @@ class Planner {
         dueDate.style.borderColor = "#c0392b";
         dueTime.style.borderColor = "#c0392b";
         new Notice("Start can't be after the due date.");
+        return;
+      }
+
+      if (toNote) {
+        ov.remove();
+        this.createDeadline({
+          title,
+          due,
+          start,
+          course: inputTags.value.trim(),
+        });
         return;
       }
 

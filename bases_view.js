@@ -1,5 +1,7 @@
 "use strict";
 
+const obsidian = require("obsidian");
+
 // Flow Planner as an Obsidian Bases view (needs Obsidian 1.10+).
 //
 // The base does the filtering and sorting. This file only turns the rows it
@@ -27,6 +29,10 @@ const FALLBACK_PALETTE = [
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/;
 
 const pad = (n) => String(n).padStart(2, "0");
+
+// How long to wait after a note is created before checking whether this
+// view shows it (the base needs a moment to refresh).
+const TUNING = { newNoteCheckMs: 2500 };
 
 // "note.due" -> { type: "note", name: "due" }
 function splitPropId(id) {
@@ -155,15 +161,9 @@ function entriesToDeadlines(app, entries, mapping, courseColors) {
       ? parseDateTime(readProp(app, entry, mapping.startProp))
       : null;
     const course = firstCourse(readProp(app, entry, mapping.courseProp));
-    const base = entry.file.basename;
-    const title = !course
-      ? base
-      : base.toLowerCase().startsWith(course.toLowerCase() + "_")
-        ? base
-        : `${course.toUpperCase()}_${base}`;
     list.push({
       id: "base:" + entry.file.path,
-      title,
+      title: entry.file.basename,
       due,
       start,
       color: colorFor(course, courseColors),
@@ -186,6 +186,10 @@ function makeBasesView(obsidian, Planner, plugin) {
       this.plannerEl = this.hostEl.createDiv({ cls: "fp-bases-planner" });
       this.statusEl = this.hostEl.createDiv({ cls: "fp-bases-status" });
       this.planner = new Planner(plugin);
+      this.planner.baseOnly = true;
+      this.planner.createDeadline = (draft) => this._createDeadlineNote(draft);
+      this.mapping = null;
+      this.pendingWatch = null;
       this.gone = false;
       this.ready = this.planner
         .mount(this.plannerEl)
@@ -194,6 +198,7 @@ function makeBasesView(obsidian, Planner, plugin) {
 
     onunload() {
       this.gone = true;
+      if (this.pendingWatch) this.pendingWatch();
       this.ready.then(() => this.planner.unmount());
     }
 
@@ -201,6 +206,75 @@ function makeBasesView(obsidian, Planner, plugin) {
       this.ready.then(() => {
         if (!this.gone) this._sync();
       });
+    }
+
+    // Make a note for a deadline drawn or typed into the planner. Obsidian's
+    // own new-note flow decides where it goes; we only fill in the dates.
+    async _createDeadlineNote(draft) {
+      const key = (id) =>
+        id && splitPropId(id).type === "note" ? splitPropId(id).name : null;
+      const m = this.mapping || {};
+      const dueKey = key(m.dateProp);
+      if (!dueKey) {
+        new obsidian.Notice(
+          "Pick a due date property in this view's options before creating deadlines.",
+        );
+        return;
+      }
+      const startKey = key(m.startProp);
+      const doneKey = key(m.doneProp);
+      const courseKey = key(m.courseProp);
+      const stamp = (dt) => (dt.time ? `${dt.date}T${dt.time}` : dt.date);
+
+      this._watchForNewNote(draft.title);
+      try {
+        await this.createFileForView(draft.title, (fm) => {
+          fm[dueKey] = stamp(draft.due || draft.start);
+          if (startKey && draft.start && draft.due) fm[startKey] = stamp(draft.start);
+          if (doneKey && fm[doneKey] === undefined) fm[doneKey] = false;
+          if (courseKey && draft.course && fm[courseKey] === undefined) {
+            const c = draft.course.replace(/^#/, "");
+            fm[courseKey] = courseKey === "tags" ? [c] : c;
+          }
+        });
+      } catch (e) {
+        console.error("[flow-planner] createFileForView failed", e);
+        new obsidian.Notice("Could not create the note: " + (e && e.message));
+      }
+    }
+
+    // After a note is created, tell the user where it landed and whether
+    // this view's filter shows it. Obsidian decides that, so we just check
+    // whether the note appears in the rows it gives us.
+    _watchForNewNote(title) {
+      if (this.pendingWatch) this.pendingWatch();
+      const vault = this.app.vault;
+      let timer = null;
+      const stop = () => {
+        vault.offref(ref);
+        clearTimeout(expire);
+        clearTimeout(timer);
+        this.pendingWatch = null;
+      };
+      const ref = vault.on("create", (file) => {
+        if (!file.path || !file.path.endsWith(".md")) return;
+        if (title && !file.basename.startsWith(title)) return;
+        vault.offref(ref);
+        timer = setTimeout(() => {
+          this.pendingWatch = null;
+          clearTimeout(expire);
+          if (this.gone) return;
+          const shown = this.data.data.some((e) => e.file.path === file.path);
+          new obsidian.Notice(
+            shown
+              ? `Created "${file.path}".`
+              : `Created "${file.path}", but this view's filter hides it. Check its folder and properties.`,
+            shown ? 4000 : 10000,
+          );
+        }, TUNING.newNoteCheckMs);
+      });
+      const expire = setTimeout(stop, 60000);
+      this.pendingWatch = stop;
     }
 
     _sync() {
@@ -235,8 +309,8 @@ function makeBasesView(obsidian, Planner, plugin) {
         colorText == null ? DEFAULT_COURSE_COLORS : colorText,
       );
       const { list, skipped } = entriesToDeadlines(app, entries, mapping, colors);
-      const showManual = cfg.get("showManual") !== false;
-      this.planner.setBaseDeadlines(list, { showManual });
+      this.mapping = mapping;
+      this.planner.setBaseDeadlines(list);
 
       const short = (p) => (p ? splitPropId(p).name : "none");
       this.statusEl.setText(
@@ -250,7 +324,6 @@ function makeBasesView(obsidian, Planner, plugin) {
 }
 
 function registerPlannerBasesView(plugin, Planner) {
-  const obsidian = require("obsidian");
   // Older Obsidian versions have no Bases API: skip quietly.
   if (typeof plugin.registerBasesView !== "function" || !obsidian.BasesView) {
     return false;
@@ -293,12 +366,6 @@ function registerPlannerBasesView(plugin, Planner) {
           placeholder: "ppm=#ffe37d, mt=#e08283",
           default: DEFAULT_COURSE_COLORS,
         },
-        {
-          type: "toggle",
-          key: "showManual",
-          displayName: "Show hand-made deadlines",
-          default: true,
-        },
       ],
     });
     return true;
@@ -319,4 +386,5 @@ module.exports = {
   splitPropId,
   readProp,
   BASES_VIEW_TYPE,
+  TUNING,
 };
