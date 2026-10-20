@@ -156,6 +156,11 @@ const COLORS = [
 // A checklist item carrying one of these tags counts as a "concept".
 const CONCEPT_TAGS = ["self"];
 
+// Where a deadline's note opens when you double-click its squiggle (or press
+// Edit in its tooltip): "split" = split pane to the right, "tab" = new tab,
+// "window" = popout window, false = replace the current tab.
+const DEADLINE_NOTE_OPEN = "split";
+
 const START_H = 0;
 const END_H = 24;
 const SLOT_MINS = 30;
@@ -823,7 +828,11 @@ class Planner {
     // Deadlines that come from a base are edited in their note, not here.
     if (dl && dl.source === "base") {
       if (dl.noteLink) {
-        this.plugin.app.workspace.openLinkText(dl.noteLink, "", false);
+        this.plugin.app.workspace.openLinkText(
+          dl.noteLink,
+          "",
+          DEADLINE_NOTE_OPEN,
+        );
       }
       return;
     }
