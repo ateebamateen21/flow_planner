@@ -749,11 +749,34 @@ class Planner {
   _moveDeadlineTip(e) {
     if (this._deadlineTipPinned) return;
     const tip = this._deadlineTip;
-    if (!tip || !this.root) return;
-    const rect = this.root.getBoundingClientRect();
-    tip.style.left =
-      Math.min(e.clientX - rect.left + 10, rect.width - 240) + "px";
-    tip.style.top = Math.max(4, e.clientY - rect.top - 60) + "px";
+    if (!tip || !this.root || tip.style.display === "none") return;
+    this._placeTip(tip, e);
+  }
+
+  // Puts a tooltip just below and to the right of the cursor (flipping to the
+  // other side near a window edge). Tooltips are `position: fixed`, which is
+  // normally relative to the window, but an ancestor with a transform would
+  // make it relative to that ancestor instead. So measure where (0, 0) really
+  // lands and correct for it, rather than assuming.
+  _placeTip(tip, e) {
+    const win = tip.ownerDocument.defaultView || window;
+    const gap = 12;
+    const edge = 8;
+    tip.style.left = "0px";
+    tip.style.top = "0px";
+    const origin = tip.getBoundingClientRect();
+    let x = e.clientX + gap;
+    let y = e.clientY + gap;
+    if (x + origin.width > win.innerWidth - edge) {
+      x = e.clientX - origin.width - gap;
+    }
+    if (y + origin.height > win.innerHeight - edge) {
+      y = e.clientY - origin.height - gap;
+    }
+    x = Math.max(edge, x);
+    y = Math.max(edge, y);
+    tip.style.left = x - origin.left + "px";
+    tip.style.top = y - origin.top + "px";
   }
 
   _hideDeadlineTipIfNotPinned() {
@@ -1426,10 +1449,7 @@ class Planner {
       `<div class="tl-tip-title">${ev.title}</div>` +
       `<div class="tl-tip-meta">${meta}${extra}</div>`;
 
-    const rect = this.root.getBoundingClientRect();
-    tip.style.left =
-      Math.min(e.clientX - rect.left + 10, rect.width - 230) + "px";
-    tip.style.top = Math.max(4, e.clientY - rect.top - 60) + "px";
+    this._placeTip(tip, e);
   }
 
   _hideTip() {
