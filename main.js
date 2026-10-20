@@ -1,6 +1,13 @@
 "use strict";
 
-const { Plugin, ItemView, Notice, setIcon } = require("obsidian");
+const {
+  Plugin,
+  PluginSettingTab,
+  Setting,
+  ItemView,
+  Notice,
+  setIcon,
+} = require("obsidian");
 const { DeadlineLayer, DL, deadlineIsValid } = require("./deadline");
 const { DeadlineDragCreate } = require("./deadline_drag");
 const { registerPlannerBasesView } = require("./bases_view");
@@ -48,6 +55,13 @@ const STRINGS = {
     tipAllDay: "📅 Dia todo",
     readonlyNotice: "📄 Evento da nota (somente leitura)",
     legacyDeadlineNote: "Dados antigos do plugin · sem nota vinculada",
+    settingNoteOpenName: "Abrir notas em",
+    settingNoteOpenDesc:
+      "Onde a nota abre ao clicar com o botão do meio em um evento ou ao clicar duas vezes em um deadline.",
+    noteOpenSplit: "Divisão à direita",
+    noteOpenCurrent: "Aba atual",
+    noteOpenTab: "Nova aba",
+    noteOpenFloating: "Janela flutuante",
     months: [
       "Jan",
       "Fev",
@@ -99,6 +113,13 @@ const STRINGS = {
     tipAllDay: "📅 All day",
     readonlyNotice: "📄 Event from note (read-only)",
     legacyDeadlineNote: "Older plugin data · no linked note",
+    settingNoteOpenName: "Open notes in",
+    settingNoteOpenDesc:
+      "Where a note opens when you middle-click an event card or double-click a deadline squiggle.",
+    noteOpenSplit: "Split right",
+    noteOpenCurrent: "Current tab",
+    noteOpenTab: "New tab",
+    noteOpenFloating: "Floating window",
     months: [
       "Jan",
       "Feb",
@@ -158,13 +179,16 @@ const COLORS = [
 // A checklist item carrying one of these tags counts as a "concept".
 const CONCEPT_TAGS = ["self"];
 
-// Where a deadline's note opens when you double-click its squiggle (or press
-// Edit in its tooltip): "split" = split pane to the right, "tab" = new tab,
-// "window" = popout window, false = replace the current tab.
-const DEADLINE_NOTE_OPEN = "split";
-
-// Same idea for event cards: where a middle-click opens the event's note.
-const EVENT_NOTE_OPEN = "split";
+// Where a note opens when you middle-click an event card or double-click a
+// deadline squiggle. The choice is a plugin setting (`noteOpenMode`); this maps
+// it to what Obsidian's openLinkText() expects.
+const DEFAULT_NOTE_OPEN_MODE = "split";
+const NOTE_OPEN_TARGETS = {
+  split: "split", // split pane to the right
+  current: false, // replace the current tab
+  tab: "tab", // new tab
+  floating: "window", // floating (popout) window
+};
 
 // Id this plugin registers with Obsidian's Page Preview, so hovering a
 // deadline can show the same floating note preview as hovering a link.
@@ -863,7 +887,7 @@ class Planner {
         this.plugin.app.workspace.openLinkText(
           dl.noteLink,
           "",
-          DEADLINE_NOTE_OPEN,
+          this.plugin.noteOpenTarget(),
         );
       }
       return;
@@ -1437,7 +1461,7 @@ class Planner {
           this.plugin.app.workspace.openLinkText(
             notePath,
             "",
-            EVENT_NOTE_OPEN,
+            this.plugin.noteOpenTarget(),
           );
         }
       }
@@ -1835,6 +1859,35 @@ class TimelineView extends ItemView {
   }
 }
 
+// Plugin settings page (Settings → Flow Planner).
+class PlannerSettingTab extends PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  display() {
+    const t = STRINGS[detectLang()];
+    const { containerEl } = this;
+    containerEl.empty();
+
+    new Setting(containerEl)
+      .setName(t.settingNoteOpenName)
+      .setDesc(t.settingNoteOpenDesc)
+      .addDropdown((dd) => {
+        dd.addOption("split", t.noteOpenSplit);
+        dd.addOption("current", t.noteOpenCurrent);
+        dd.addOption("tab", t.noteOpenTab);
+        dd.addOption("floating", t.noteOpenFloating);
+        dd.setValue(this.plugin.data.noteOpenMode);
+        dd.onChange(async (value) => {
+          this.plugin.data.noteOpenMode = value;
+          await this.plugin.saveAll();
+        });
+      });
+  }
+}
+
 class TimelinePlugin extends Plugin {
   async loadAll() {
     const saved = (await this.loadData()) || {};
@@ -1842,7 +1895,18 @@ class TimelinePlugin extends Plugin {
       events: Array.isArray(saved.events) ? saved.events : [],
       deadlines: Array.isArray(saved.deadlines) ? saved.deadlines : [],
       deadlineMode: saved.deadlineMode === true,
+      noteOpenMode: Object.prototype.hasOwnProperty.call(
+        NOTE_OPEN_TARGETS,
+        saved.noteOpenMode,
+      )
+        ? saved.noteOpenMode
+        : DEFAULT_NOTE_OPEN_MODE,
     };
+  }
+
+  // What to pass to openLinkText() for the "Open notes in" setting.
+  noteOpenTarget() {
+    return NOTE_OPEN_TARGETS[this.data.noteOpenMode];
   }
 
   async saveAll() {
@@ -1858,6 +1922,7 @@ class TimelinePlugin extends Plugin {
       display: "Flow Planner",
       defaultMod: false,
     });
+    this.addSettingTab(new PlannerSettingTab(this.app, this));
 
     const lang = detectLang();
     const t = STRINGS[lang];
