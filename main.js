@@ -163,6 +163,9 @@ const CONCEPT_TAGS = ["self"];
 // "window" = popout window, false = replace the current tab.
 const DEADLINE_NOTE_OPEN = "split";
 
+// Same idea for event cards: where a middle-click opens the event's note.
+const EVENT_NOTE_OPEN = "split";
+
 // Id this plugin registers with Obsidian's Page Preview, so hovering a
 // deadline can show the same floating note preview as hovering a link.
 const HOVER_SOURCE = "flow-planner";
@@ -1431,7 +1434,11 @@ class Planner {
 
         const notePath = this._getEventNotePath(ev);
         if (notePath) {
-          this.plugin.app.workspace.openLinkText(notePath, "", false);
+          this.plugin.app.workspace.openLinkText(
+            notePath,
+            "",
+            EVENT_NOTE_OPEN,
+          );
         }
       }
     };
