@@ -11,7 +11,6 @@ const VIEW_TYPE = "timeline-calendar";
 const SHARED_KEYS = [
   "events",
   "deadlines",
-  "studyMode",
   "taskMode",
   "conceptMode",
   "deadlineMode",
@@ -50,8 +49,6 @@ const STRINGS = {
     placeholderTags: "estudo, academia, trabalho",
     tipAllDay: "📅 Dia todo",
     readonlyNotice: "📄 Evento da nota (somente leitura)",
-    studyModeOn: "🎓 Modo Estudo",
-    studyModeOff: "📅 Modo Normal",
     months: [
       "Jan",
       "Fev",
@@ -102,8 +99,6 @@ const STRINGS = {
     placeholderTags: "study, gym, work",
     tipAllDay: "📅 All day",
     readonlyNotice: "📄 Event from note (read-only)",
-    studyModeOn: "🎓 Study Mode",
-    studyModeOff: "📅 Normal Mode",
     months: [
       "Jan",
       "Feb",
@@ -162,91 +157,6 @@ const COLORS = [
 
 const TASK_MODE_TAGS = ["quiz", "assignment", "presentation", "task"];
 const CONCEPT_MODE_TAGS = ["self"];
-
-// ─── study planner ────────────────────────────────────────────────────────────
-
-const STUDY_KEYWORDS = [
-  "study",
-  "revision",
-  "review",
-  "biology",
-  "chemistry",
-  "physics",
-  "math",
-  "mathematics",
-  "english",
-  "history",
-  "geography",
-  "science",
-  "literature",
-  "grammar",
-  "vocabulary",
-  "exercise",
-  "practice",
-  "homework",
-  "reading",
-  "lecture",
-  "exam",
-  "test",
-  "quiz",
-  "class",
-  "estudo",
-  "estudar",
-  "revisão",
-  "revisao",
-  "biologia",
-  "química",
-  "quimica",
-  "física",
-  "fisica",
-  "matemática",
-  "matematica",
-  "inglês",
-  "ingles",
-  "história",
-  "historia",
-  "geografia",
-  "ciência",
-  "ciencia",
-  "literatura",
-  "gramática",
-  "gramatica",
-  "vocabulário",
-  "vocabulario",
-  "exercício",
-  "exercicio",
-  "prática",
-  "pratica",
-  "tarefa",
-  "leitura",
-  "aula",
-  "prova",
-  "teste",
-  "redação",
-  "redacao",
-  "portugues",
-  "português",
-];
-
-function isStudyEvent(title) {
-  const lower = title.toLowerCase();
-  return STUDY_KEYWORDS.some((kw) => lower.includes(kw));
-}
-
-function studyColor(title) {
-  const t = title.toLowerCase();
-  if (/biolog/.test(t)) return "#3aaa6e";
-  if (/quím|chem|quim/.test(t)) return "#e07c3a";
-  if (/físic|physic|fisic/.test(t)) return "#4a7fe8";
-  if (/mat(h|em)/.test(t)) return "#7c5cbf";
-  if (/ingl|engl/.test(t)) return "#2bbfc9";
-  if (/hist/.test(t)) return "#c9722b";
-  if (/geo/.test(t)) return "#5a7fa8";
-  if (/portugu|liter|redaç|redac/.test(t)) return "#c94f7c";
-  if (/revis|review/.test(t)) return "#e05c5c";
-  if (/chem/.test(t)) return "#e07c3a";
-  return "#4a7fe8";
-}
 
 const START_H = 0;
 const END_H = 24;
@@ -445,18 +355,6 @@ class Planner {
 
   // ── persistence ─────────────────────────────────────────────────────────
 
-  // async _loadData() {
-  //   const saved = await this.plugin.loadData();
-  //   if (saved && Array.isArray(saved.events) && saved.events.length > 0) {
-  //     this.state.events = saved.events;
-  //   } else {
-  //     this.state.events = this._sampleEvents();
-  //   }
-  //   this.state.studyMode = saved && saved.studyMode === true;
-  //   this.state.taskMode = saved && saved.taskMode === true;
-  //   this.state.conceptMode = saved && saved.conceptMode === true;
-  // }
-
   async _loadData() {
     // The plugin already holds the data; only fill in the sample events
     // on a first run, as before.
@@ -464,16 +362,6 @@ class Planner {
       this.state.events = this._sampleEvents();
     }
   }
-
-  // async _saveData() {
-  //   // Only persist user-created events; note events are always re-parsed
-  //   await this.plugin.saveData({
-  //     events: this.state.events,
-  //     studyMode: this.state.studyMode,
-  //     taskMode: this.state.taskMode,
-  //     conceptMode: this.state.conceptMode,
-  //   });
-  // }
 
   async _saveData() {
     await this.plugin.saveAll();
@@ -703,22 +591,6 @@ class Planner {
         this.render();
       };
     });
-
-    const studyBtn = tb.createEl("button", {
-      cls: "tl-study-btn" + (this.state.studyMode ? " active" : ""),
-      text: this.state.studyMode ? t.studyModeOn : t.studyModeOff,
-    });
-    this._studyBtn = studyBtn;
-    studyBtn.onclick = () => {
-      this.state.studyMode = !this.state.studyMode;
-      studyBtn.textContent = this.state.studyMode
-        ? t.studyModeOn
-        : t.studyModeOff;
-      studyBtn.classList.toggle("active", this.state.studyMode);
-      this.root.classList.toggle("study-mode", this.state.studyMode);
-      this._saveData();
-      this.render();
-    };
 
     const taskBtn = tb.createEl("button", {
       cls: "tl-task-btn" + (this.state.taskMode ? " active" : ""),
@@ -1237,7 +1109,6 @@ class Planner {
     const t = this._t;
     this._updatePeriod();
     this._navEl.style.display = this.state.zoom === 1 ? "none" : "flex";
-    this.root.classList.toggle("study-mode", this.state.studyMode);
 
     const scroll = this._scroll;
     const savedTop = scroll.scrollTop;
@@ -1521,14 +1392,12 @@ class Planner {
     if (ss < 0 || ss >= TOTAL) return;
 
     const isNote = ev._source === "note";
-    const isStudy = this.state.studyMode && isStudyEvent(ev.title);
 
     const el = col.createDiv({
       cls:
         "tl-ev" +
         (ev.done ? " done" : "") +
-        (isNote ? " tl-ev-note" : "") +
-        (isStudy ? " tl-ev-study" : ""),
+        (isNote ? " tl-ev-note" : ""),
     });
     el.style.top = ss * SH + 1 + "px";
     el.style.height = dur * SH - 2 + "px";
@@ -1633,13 +1502,8 @@ class Planner {
         }
       }
     }
-    // In study mode, note events get a subject-based colour
-    if (isNote && this.state.studyMode) {
-      el.style.background = studyColor(ev.title);
-    } else {
-      el.style.background = ev.color;
-      el.style.color = this._getContrastColor(ev.color);
-    }
+    el.style.background = ev.color;
+    el.style.color = this._getContrastColor(ev.color);
 
     el.createDiv({ cls: "tl-ev-title", text: ev.title });
     if (ev.startTime) {
@@ -2063,7 +1927,6 @@ class TimelinePlugin extends Plugin {
     this.data = {
       events: Array.isArray(saved.events) ? saved.events : [],
       deadlines: Array.isArray(saved.deadlines) ? saved.deadlines : [],
-      studyMode: saved.studyMode === true,
       taskMode: saved.taskMode === true,
       conceptMode: saved.conceptMode === true,
       deadlineMode: saved.deadlineMode === true,

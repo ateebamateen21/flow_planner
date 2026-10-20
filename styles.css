@@ -525,44 +525,6 @@
   font-weight: 600;
 }
 
-/* ── STUDY MODE BUTTON ── */
-.tl-study-btn {
-  background: transparent;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 3px 10px;
-  font-size: 11px;
-  font-weight: 700;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-.tl-study-btn:hover {
-  background: var(--background-modifier-hover);
-  color: var(--text-normal);
-}
-.tl-study-btn.active {
-  background: color-mix(in srgb, #3aaa6e 20%, transparent);
-  border-color: #3aaa6e;
-  color: #3aaa6e;
-}
-
-/* ── STUDY MODE EVENT ── */
-.study-mode .tl-ev-study {
-  border-left: 3px solid rgba(255, 255, 255, 0.5);
-  font-weight: 700;
-  letter-spacing: 0.01em;
-}
-.study-mode .tl-ev-study .tl-ev-title {
-  font-size: 11px;
-  font-weight: 800;
-}
-.study-mode .tl-ev-study .tl-ev-time {
-  font-size: 10px;
-  opacity: 0.9;
-}
-
 /* ── NOTE AUTOCOMPLETE SUGGESTIONS ── */
 .tl-note-suggestions {
   position: relative;
