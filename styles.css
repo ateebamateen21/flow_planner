@@ -698,11 +698,6 @@
   animation: tl-dl-pulse 1.6s ease-out infinite;
 }
 
-/* Deadline tooltip inherits .tl-tip; just add a slight accent */
-.tl-dl-tip {
-  border-left: 3px solid #a0c2c8;
-}
-
 /* styles for the editing of deadlines */
 .tl-dl-edit {
   display: block;
