@@ -338,6 +338,7 @@
   transition: opacity 0.15s;
   /* lets the corner icons size themselves from the card width */
   container-type: inline-size;
+  background: var(--ev-bg);
   z-index: 5;
   display: flex;
   flex-direction: column;
@@ -393,6 +394,32 @@
   .tl-ev-icons {
     display: none;
   }
+}
+
+/* ── DEADLINE MODE: dim every event so the squiggles show through ──
+   Only the card's background and text are dimmed (not the whole card), so the
+   note / star icons stay fully opaque. Done cards keep their own 0.4 opacity,
+   and hovering a card brings its normal colours back. */
+.deadline-mode .tl-ev:not(.done) {
+  background: color-mix(in srgb, var(--ev-bg) 45%, transparent);
+}
+.deadline-mode .tl-ev:not(.done) .tl-ev-title {
+  opacity: 0.45;
+}
+.deadline-mode .tl-ev:not(.done) .tl-ev-time {
+  opacity: 0.4;
+}
+.deadline-mode .tl-ev:not(.done):hover {
+  background: var(--ev-bg);
+}
+.deadline-mode .tl-ev:not(.done):hover .tl-ev-title {
+  opacity: 1;
+}
+.deadline-mode .tl-ev:not(.done):hover .tl-ev-time {
+  opacity: 0.85;
+}
+.deadline-mode .tl-allday-ev {
+  opacity: 0.45;
 }
 
 /* ── NOW LINE ── */

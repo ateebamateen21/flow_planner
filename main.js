@@ -587,7 +587,6 @@ class Planner {
     dlBtn.onclick = async () => {
       this.state.deadlineMode = !this.state.deadlineMode;
       dlBtn.classList.toggle("active", this.state.deadlineMode);
-      this.root.classList.toggle("deadline-mode", this.state.deadlineMode);
       await this._saveData();
       if (this._addDlBtn) {
         this._addDlBtn.style.display = this.state.deadlineMode
@@ -1041,6 +1040,7 @@ class Planner {
     const t = this._t;
     this._updatePeriod();
     this._navEl.style.display = this.state.zoom === 1 ? "none" : "flex";
+    this.root.classList.toggle("deadline-mode", this.state.deadlineMode);
 
     const scroll = this._scroll;
     const savedTop = scroll.scrollTop;
@@ -1334,7 +1334,7 @@ class Planner {
     el.style.top = ss * SH + 1 + "px";
     el.style.height = dur * SH - 2 + "px";
 
-    el.style.background = ev.color;
+    el.style.setProperty("--ev-bg", ev.color);
     el.style.color = this._getContrastColor(ev.color);
 
     el.createDiv({ cls: "tl-ev-title", text: ev.title });
