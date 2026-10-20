@@ -47,6 +47,7 @@ const STRINGS = {
     placeholderTags: "estudo, academia, trabalho",
     tipAllDay: "📅 Dia todo",
     readonlyNotice: "📄 Evento da nota (somente leitura)",
+    legacyDeadlineNote: "Dados antigos do plugin · sem nota vinculada",
     months: [
       "Jan",
       "Fev",
@@ -97,6 +98,7 @@ const STRINGS = {
     placeholderTags: "study, gym, work",
     tipAllDay: "📅 All day",
     readonlyNotice: "📄 Event from note (read-only)",
+    legacyDeadlineNote: "Older plugin data · no linked note",
     months: [
       "Jan",
       "Feb",
@@ -160,6 +162,10 @@ const CONCEPT_TAGS = ["self"];
 // Edit in its tooltip): "split" = split pane to the right, "tab" = new tab,
 // "window" = popout window, false = replace the current tab.
 const DEADLINE_NOTE_OPEN = "split";
+
+// Id this plugin registers with Obsidian's Page Preview, so hovering a
+// deadline can show the same floating note preview as hovering a link.
+const HOVER_SOURCE = "flow-planner";
 
 const START_H = 0;
 const END_H = 24;
@@ -275,6 +281,8 @@ class Planner {
     this._tip = null;
     this._deadlineTip = null;
     this._deadlineTipPinned = false;
+    // Obsidian stores the hover-preview popover it opens for us here.
+    this.hoverPopover = null;
     this._navEl = null;
     this._periodEl = null;
     this._gutterSlots = null;
@@ -695,6 +703,14 @@ class Planner {
   _showDeadlineTip(e, dl, pin = false) {
     const t = this._t;
 
+    // A deadline with a linked note gets Obsidian's own hover preview and no
+    // custom tooltip (clicking it doesn't pin one either).
+    if (dl.noteLink && dl.noteLink.trim()) {
+      if (pin) this._hideDeadlineTipForced();
+      else this._previewDeadlineNote(e, dl);
+      return;
+    }
+
     // Get or create the single shared deadline tooltip element.
     let tip = this._deadlineTip;
     if (!tip) {
@@ -718,8 +734,8 @@ class Planner {
     }
     if (dl.notes) lines.push(`📝 ${dl.notes}`);
     if (dl.tags) lines.push(`🏷 ${dl.tags}`);
-    if (dl.noteLink) lines.push(`🔗 ${dl.noteLink}`);
     if (dl.done) lines.push(`✓ ${t.fieldDone}`);
+    lines.push(`ⓘ ${t.legacyDeadlineNote}`);
 
     // Set the header + meta. This wipes any button we appended last time.
     tip.innerHTML =
@@ -749,6 +765,19 @@ class Planner {
     // Position and pin state.
     this._moveDeadlineTip(e);
     if (pin) this._deadlineTipPinned = true;
+  }
+
+  // Shows Obsidian's native hover preview of the deadline's note, the same
+  // floating card you get from hovering an internal link.
+  _previewDeadlineNote(e, dl) {
+    this.plugin.app.workspace.trigger("hover-link", {
+      event: e,
+      source: HOVER_SOURCE,
+      hoverParent: this,
+      targetEl: e.currentTarget || e.target,
+      linktext: dl.noteLink.trim(),
+      sourcePath: "",
+    });
   }
 
   _moveDeadlineTip(e) {
@@ -1818,6 +1847,10 @@ class TimelinePlugin extends Plugin {
     this.registerView(VIEW_TYPE, (leaf) => new TimelineView(leaf, this));
     // Also available as a view type inside any base (Obsidian 1.10+).
     registerPlannerBasesView(this, Planner);
+    this.registerHoverLinkSource(HOVER_SOURCE, {
+      display: "Flow Planner",
+      defaultMod: false,
+    });
 
     const lang = detectLang();
     const t = STRINGS[lang];
