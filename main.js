@@ -1,6 +1,6 @@
 "use strict";
 
-const { Plugin, ItemView, Notice } = require("obsidian");
+const { Plugin, ItemView, Notice, setIcon } = require("obsidian");
 const { DeadlineLayer, DL, deadlineIsValid } = require("./deadline");
 const { DeadlineDragCreate } = require("./deadline_drag");
 const { registerPlannerBasesView } = require("./bases_view");
@@ -11,8 +11,6 @@ const VIEW_TYPE = "timeline-calendar";
 const SHARED_KEYS = [
   "events",
   "deadlines",
-  "taskMode",
-  "conceptMode",
   "deadlineMode",
 ];
 
@@ -155,8 +153,8 @@ const COLORS = [
   "#cbc4c1", // Tutorial/Mentoring
 ];
 
-const TASK_MODE_TAGS = ["quiz", "assignment", "presentation", "task"];
-const CONCEPT_MODE_TAGS = ["self"];
+// A checklist item carrying one of these tags counts as a "concept".
+const CONCEPT_TAGS = ["self"];
 
 const START_H = 0;
 const END_H = 24;
@@ -278,8 +276,7 @@ class Planner {
     this._scroll = null;
     this._lang = "en";
     this._vaultRefs = [];
-    this._taskStateCache = new Map();
-    this._conceptStateCache = new Map();
+    this._noteStateCache = new Map();
   }
 
   get _t() {
@@ -308,12 +305,7 @@ class Planner {
 
     await this._loadData();
     await this._loadNoteEvents();
-    if (this.state.taskMode) {
-      await this._refreshTaskStates();
-    }
-    if (this.state.conceptMode) {
-      await this._refreshConceptStates();
-    }
+    await this._refreshNoteStates();
 
     this.container = container;
     container.empty();
@@ -518,15 +510,9 @@ class Planner {
     const vault = this.plugin.app.vault;
 
     const refresh = async () => {
-      this._taskStateCache.clear();
-      this._conceptStateCache.clear();
+      this._noteStateCache.clear();
       await this._loadNoteEvents();
-      if (this.state.taskMode) {
-        await this._refreshTaskStates();
-      }
-      if (this.state.conceptMode) {
-        await this._refreshConceptStates();
-      }
+      await this._refreshNoteStates();
       this.render();
     };
 
@@ -591,60 +577,6 @@ class Planner {
         this.render();
       };
     });
-
-    const taskBtn = tb.createEl("button", {
-      cls: "tl-task-btn" + (this.state.taskMode ? " active" : ""),
-      text: this.state.taskMode ? "✓ Task Mode" : "☐ Task Mode",
-    });
-    this._taskBtn = taskBtn;
-
-    const conceptBtn = tb.createEl("button", {
-      cls: "tl-concept-btn" + (this.state.conceptMode ? " active" : ""),
-      text: this.state.conceptMode ? "★ Concept Mode" : "☆ Concept Mode",
-    });
-    this._conceptBtn = conceptBtn;
-
-    taskBtn.onclick = async () => {
-      this.state.taskMode = !this.state.taskMode;
-      if (this.state.taskMode && this.state.conceptMode) {
-        this.state.conceptMode = false;
-        conceptBtn.textContent = "☆ Concept Mode";
-        conceptBtn.classList.remove("active");
-      }
-
-      taskBtn.textContent = this.state.taskMode ? "✓ Task Mode" : "☐ Task Mode";
-      taskBtn.classList.toggle("active", this.state.taskMode);
-      this.root.classList.toggle("task-mode", this.state.taskMode);
-      this.root.classList.toggle("concept-mode", this.state.conceptMode);
-
-      await this._saveData();
-      if (this.state.taskMode) {
-        await this._refreshTaskStates();
-      }
-      this.render();
-    };
-
-    conceptBtn.onclick = async () => {
-      this.state.conceptMode = !this.state.conceptMode;
-      if (this.state.conceptMode && this.state.taskMode) {
-        this.state.taskMode = false;
-        taskBtn.textContent = "☐ Task Mode";
-        taskBtn.classList.remove("active");
-      }
-
-      conceptBtn.textContent = this.state.conceptMode
-        ? "★ Concept Mode"
-        : "☆ Concept Mode";
-      conceptBtn.classList.toggle("active", this.state.conceptMode);
-      this.root.classList.toggle("task-mode", this.state.taskMode);
-      this.root.classList.toggle("concept-mode", this.state.conceptMode);
-
-      await this._saveData();
-      if (this.state.conceptMode) {
-        await this._refreshConceptStates();
-      }
-      this.render();
-    };
 
     // Deadline Button Functions
     const dlBtn = tb.createEl("button", {
@@ -1254,7 +1186,7 @@ class Planner {
 
   // ── Render event block ───────────────────────────────────────────────────
 
-  // ── Task state ───────────────────────────────────────────────────────────
+  // ── Linked note state ────────────────────────────────────────────────────
 
   _getEventNotePath(ev) {
     if (ev._source === "note") {
@@ -1359,32 +1291,32 @@ class Planner {
     }
   }
 
-  async _getTaskState(ev) {
-    return this._scanSectionForTags(ev, TASK_MODE_TAGS, this._taskStateCache);
+  // Reads the event's linked note (or the heading section it points to) and
+  // caches what the card needs: does it exist, and does it hold concepts.
+  async _getNoteState(ev) {
+    return this._scanSectionForTags(ev, CONCEPT_TAGS, this._noteStateCache);
   }
 
-  async _getConceptState(ev) {
-    const state = await this._scanSectionForTags(
-      ev,
-      CONCEPT_MODE_TAGS,
-      this._conceptStateCache,
-    );
-    if (state === "all-pending" || state === "mixed") return "incomplete";
-    if (state === "all-done") return "complete";
-    return state;
-  }
-
-  async _refreshTaskStates() {
-    this._taskStateCache.clear();
+  async _refreshNoteStates() {
     const events = this._allEvents();
-    await Promise.all(events.map((ev) => this._getTaskState(ev)));
+    await Promise.all(events.map((ev) => this._getNoteState(ev)));
   }
 
-  async _refreshConceptStates() {
-    this._conceptStateCache.clear();
-    const events = this._allEvents();
-    await Promise.all(events.map((ev) => this._getConceptState(ev)));
+  // What the card shows about its linked note.
+  //   linked  – there is a note to open
+  //   concept – "none", "unchecked" (some #self items still open) or
+  //             "checked" (every #self item is done)
+  _noteInfo(ev) {
+    const path = this._getEventNotePath(ev);
+    const raw = path ? this._noteStateCache.get(path) : undefined;
+    if (!raw || raw === "missing" || raw === "no-link") {
+      return { linked: false, concept: "none" };
+    }
+    if (raw === "all-done") return { linked: true, concept: "checked" };
+    if (raw === "none") return { linked: true, concept: "none" };
+    return { linked: true, concept: "unchecked" }; // all-pending / mixed
   }
+
   _renderEv(col, ev) {
     const ss = timeToSlot(ev.startTime);
     const es = timeToSlot(ev.endTime);
@@ -1402,106 +1334,6 @@ class Planner {
     el.style.top = ss * SH + 1 + "px";
     el.style.height = dur * SH - 2 + "px";
 
-    // In task mode, add these related icons based on linked notes' task completion
-
-    if (this.state.taskMode) {
-      const notePath = this._getEventNotePath(ev);
-
-      if (!notePath) {
-        el.style.opacity = "0.45";
-      } else {
-        const taskState = this._taskStateCache.get(notePath) ?? "missing";
-        if (taskState === "missing") {
-          el.style.opacity = "0.45";
-        } else if (taskState === "all-pending") {
-          const indicator = el.createDiv({ cls: "tl-task-indicator pending" });
-          indicator.textContent = "•";
-          indicator.style.position = "absolute";
-          indicator.style.right = "5px";
-          indicator.style.bottom = "2px";
-          indicator.style.border = "1px solid black";
-          indicator.style.borderRadius = "20px";
-          indicator.style.color = "#ff3b30";
-          indicator.style.fontSize = "30px";
-          indicator.style.fontWeight = "900";
-          indicator.style.lineHeight = "10px";
-          indicator.style.zIndex = "5";
-        } else if (taskState === "mixed") {
-          const indicator = el.createDiv({ cls: "tl-task-indicator mixed" });
-          indicator.textContent = "•";
-          indicator.style.position = "absolute";
-          indicator.style.right = "5px";
-          indicator.style.bottom = "2px";
-          indicator.style.border = "1px solid black";
-          indicator.style.borderRadius = "20px";
-          indicator.style.color = "#ffd43b";
-          indicator.style.fontSize = "30px";
-          indicator.style.fontWeight = "900";
-          indicator.style.lineHeight = "10px";
-          indicator.style.zIndex = "5";
-        } else if (taskState === "all-done") {
-          const indicator = el.createDiv({ cls: "tl-task-indicator done" });
-          indicator.textContent = "•";
-          indicator.style.position = "absolute";
-          indicator.style.right = "5px";
-          indicator.style.bottom = "2px";
-          indicator.style.border = "1px solid black";
-          indicator.style.borderRadius = "20px";
-          indicator.style.color = "#3ddc84";
-          indicator.style.fontSize = "30px";
-          indicator.style.fontWeight = "900";
-          indicator.style.lineHeight = "10px";
-          indicator.style.zIndex = "5";
-        }
-      }
-    } else if (this.state.conceptMode) {
-      const notePath = this._getEventNotePath(ev);
-
-      if (!notePath) {
-        el.style.opacity = "0.45";
-      } else {
-        const rawState = this._conceptStateCache.get(notePath) ?? "missing";
-        const conceptState =
-          rawState === "all-pending" || rawState === "mixed"
-            ? "incomplete"
-            : rawState === "all-done"
-              ? "complete"
-              : rawState; // no-link / missing / none pass through unchanged
-
-        if (conceptState === "missing" || conceptState === "none") {
-          el.style.opacity = "0.45";
-        } else if (conceptState === "incomplete") {
-          const indicator = el.createDiv({
-            cls: "tl-concept-indicator incomplete",
-          });
-          indicator.textContent = "★";
-          indicator.style.position = "absolute";
-          indicator.style.right = "5px";
-          indicator.style.bottom = "5px";
-          // indicator.style.border = "1px solid black";
-          indicator.style.borderRadius = "20px";
-          indicator.style.color = "#ff2e7e";
-          indicator.style.fontSize = "18px";
-          indicator.style.lineHeight = "10px";
-          indicator.style.zIndex = "5";
-        } else if (conceptState === "complete") {
-          el.style.opacity = "0.75";
-          const indicator = el.createDiv({
-            cls: "tl-concept-indicator complete",
-          });
-          indicator.textContent = "★";
-          indicator.style.position = "absolute";
-          indicator.style.right = "5px";
-          indicator.style.bottom = "5px";
-          // indicator.style.border = "1px solid black";
-          indicator.style.borderRadius = "20px";
-          indicator.style.color = "#8a4fff";
-          indicator.style.fontSize = "18px";
-          indicator.style.lineHeight = "10px";
-          indicator.style.zIndex = "5";
-        }
-      }
-    }
     el.style.background = ev.color;
     el.style.color = this._getContrastColor(ev.color);
 
@@ -1511,6 +1343,22 @@ class Planner {
         cls: "tl-ev-time",
         text: ev.startTime + (ev.endTime ? " – " + ev.endTime : ""),
       });
+    }
+
+    // Small corner icons: a note icon when the event has a linked note, and a
+    // star beside it when that note holds a concept (outline = some still
+    // open, filled = all done).
+    const { linked, concept } = this._noteInfo(ev);
+    if (linked) {
+      const icons = el.createDiv({ cls: "tl-ev-icons" });
+      if (concept !== "none") {
+        const star = icons.createSpan({
+          cls: "tl-ev-icon tl-ev-star" + (concept === "checked" ? " filled" : ""),
+        });
+        setIcon(star, "star");
+      }
+      const noteIcon = icons.createSpan({ cls: "tl-ev-icon" });
+      setIcon(noteIcon, "file-text");
     }
 
     // Click behaviour:
@@ -1860,7 +1708,7 @@ class Planner {
       cls: "tl-mbtn primary",
       text: isNew ? t.btnCreate : t.btnSave,
     });
-    saveBtn.onclick = () => {
+    saveBtn.onclick = async () => {
       const title = inputTitle.value.trim();
       if (!title) {
         inputTitle.style.borderColor = "#c0392b";
@@ -1886,6 +1734,7 @@ class Planner {
 
       ov.remove();
       this._saveData();
+      await this._refreshNoteStates();
       this.render();
     };
 
@@ -1927,8 +1776,6 @@ class TimelinePlugin extends Plugin {
     this.data = {
       events: Array.isArray(saved.events) ? saved.events : [],
       deadlines: Array.isArray(saved.deadlines) ? saved.deadlines : [],
-      taskMode: saved.taskMode === true,
-      conceptMode: saved.conceptMode === true,
       deadlineMode: saved.deadlineMode === true,
     };
   }

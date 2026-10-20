@@ -336,6 +336,8 @@
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
   transition: opacity 0.15s;
+  /* lets the corner icons size themselves from the card width */
+  container-type: inline-size;
   z-index: 5;
   display: flex;
   flex-direction: column;
@@ -357,6 +359,40 @@
 .tl-ev-time {
   font-size: 9px;
   opacity: 0.85;
+}
+
+/* ── EVENT CARD ICONS (linked note + concept star) ──
+   Sized in em / container units so they follow the card, not fixed pixels. */
+.tl-ev-icons {
+  position: absolute;
+  right: 0.35em;
+  bottom: 0.3em;
+  display: flex;
+  align-items: center;
+  gap: 0.2em;
+  /* greyish rather than black, so it stays visible on any subject colour */
+  color: rgba(40, 40, 40, 0.75);
+  pointer-events: none;
+  z-index: 5;
+}
+.tl-ev-icon {
+  display: inline-flex;
+}
+.tl-ev-icon svg {
+  width: 1.4em;
+  height: 1.4em;
+  width: clamp(0.9em, 15cqw, 1.5em);
+  height: clamp(0.9em, 15cqw, 1.5em);
+  stroke-width: 2px;
+}
+.tl-ev-star.filled svg {
+  fill: currentColor;
+}
+/* Very narrow cards (long zoom levels): no room for icons */
+@container (max-width: 40px) {
+  .tl-ev-icons {
+    display: none;
+  }
 }
 
 /* ── NOW LINE ── */
