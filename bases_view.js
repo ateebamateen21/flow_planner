@@ -59,6 +59,51 @@ function readProp(app, entry, propId) {
   return v && v.isTruthy() ? v.toString() : undefined;
 }
 
+// Characters Obsidian does not allow in a note's file name.
+function sanitizeFileName(name) {
+  return String(name || "")
+    .replace(/[\\/:*?"<>|#^\[\]]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// ["Quiz_01", "Quiz_05"] -> "Quiz_06": the folder's most common prefix and
+// number width, one past the highest number. "" when nothing is numbered.
+function suggestNextName(names) {
+  const groups = new Map();
+  for (const n of names) {
+    const m = /^(.*?)(\d+)$/.exec(n);
+    if (!m) continue;
+    const v = parseInt(m[2], 10);
+    const g = groups.get(m[1]) || { count: 0, max: -1, width: 0 };
+    g.count++;
+    if (v > g.max) {
+      g.max = v;
+      g.width = m[2].length;
+    }
+    groups.set(m[1], g);
+  }
+  let best = null;
+  let bestPrefix = "";
+  for (const [prefix, g] of groups) {
+    if (!best || g.count > best.count || (g.count === best.count && g.max > best.max)) {
+      best = g;
+      bestPrefix = prefix;
+    }
+  }
+  return best ? bestPrefix + String(best.max + 1).padStart(best.width, "0") : "";
+}
+
+// "TBW/Quizzes/Quiz_02.md" -> "TBW/Quizzes" ; a file in the vault root -> "/"
+function folderOf(path) {
+  const i = path.lastIndexOf("/");
+  return i < 0 ? "/" : path.slice(0, i);
+}
+
+function folderLabel(path) {
+  return path === "/" ? "(vault root)" : path.split("/").join(" / ");
+}
+
 // "2026-12-15T13:18" -> { date, time } ; "2026-12-15" -> { date, time: null }
 function parseDateTime(raw) {
   if (raw == null || raw === "") return null;
@@ -188,6 +233,14 @@ function makeBasesView(obsidian, Planner, plugin) {
       this.planner = new Planner(plugin);
       this.planner.baseOnly = true;
       this.planner.createDeadline = (draft) => this._createDeadlineNote(draft);
+      this.planner.deadlineCreator = {
+        folders: () => this._knownFolders(),
+        suggestName: (folder) =>
+          suggestNextName(this._rowsIn(folder).map((e) => e.file.basename)),
+        pickFolder: () => this._pickFolder(),
+        lastFolder: () => plugin.data.lastDeadlineFolder || "",
+      };
+      this.rows = []; // the rows of this view that became deadlines
       this.mapping = null;
       this.pendingWatch = null;
       this.gone = false;
@@ -208,9 +261,62 @@ function makeBasesView(obsidian, Planner, plugin) {
       });
     }
 
-    // Make a note for a deadline drawn or typed into the planner. Obsidian's
-    // own new-note flow decides where it goes; we only fill in the dates.
+    // The rows of this view that live in a folder.
+    _rowsIn(folder) {
+      return this.rows.filter((e) => folderOf(e.file.path) === folder);
+    }
+
+    // Folders to offer for a new note: wherever the rows this view shows
+    // live (Obsidian already applied the filters), plus the last one used.
+    _knownFolders() {
+      const set = new Set(this.rows.map((e) => folderOf(e.file.path)));
+      const last = plugin.data.lastDeadlineFolder;
+      if (last && (last === "/" || this.app.vault.getAbstractFileByPath(last))) {
+        set.add(last);
+      }
+      return [...set]
+        .sort((a, b) => a.localeCompare(b))
+        .map((path) => ({ path, label: folderLabel(path) }));
+    }
+
+    // Any folder in the vault, picked from a search list. null = cancelled.
+    _pickFolder() {
+      const app = this.app;
+      const folders = app.vault.getAllFolders
+        ? app.vault.getAllFolders(true)
+        : app.vault.getAllLoadedFiles().filter((f) => f instanceof obsidian.TFolder);
+      return new Promise((resolve) => {
+        let chosen = false;
+        class FolderPicker extends obsidian.FuzzySuggestModal {
+          getItems() {
+            return folders;
+          }
+          getItemText(f) {
+            return folderLabel(f.path || "/");
+          }
+          onChooseItem(f) {
+            chosen = true;
+            resolve(f.path || "/");
+          }
+          onClose() {
+            // Choosing closes the dialog first, so give onChooseItem a turn.
+            setTimeout(() => {
+              if (!chosen) resolve(null);
+            }, 0);
+          }
+        }
+        const picker = new FolderPicker(app);
+        picker.setPlaceholder("Choose a folder for the new note");
+        picker.open();
+      });
+    }
+
+    // Create the note for a deadline drawn or typed into the planner, in
+    // the folder chosen in the form. It copies the other properties (kind,
+    // course, tags...) from the newest note already in that folder, so it
+    // matches the same filters, then fills in the dates.
     async _createDeadlineNote(draft) {
+      const app = this.app;
       const key = (id) =>
         id && splitPropId(id).type === "note" ? splitPropId(id).name : null;
       const m = this.mapping || {};
@@ -226,55 +332,71 @@ function makeBasesView(obsidian, Planner, plugin) {
       const courseKey = key(m.courseProp);
       const stamp = (dt) => (dt.time ? `${dt.date}T${dt.time}` : dt.date);
 
-      this._watchForNewNote(draft.title);
+      const folder = draft.folder || "/";
+      const name = sanitizeFileName(draft.title);
+      if (!name) {
+        new obsidian.Notice("Give the deadline a name.");
+        return;
+      }
+      const path = folder === "/" ? `${name}.md` : `${folder}/${name}.md`;
+      if (app.vault.getAbstractFileByPath(path)) {
+        new obsidian.Notice(`"${path}" already exists. Choose another name.`);
+        return;
+      }
+
+      const mtime = (e) => (e.file.stat && e.file.stat.mtime) || 0;
+      const neighbor = this._rowsIn(folder)
+        .slice()
+        .sort((a, b) => mtime(b) - mtime(a))[0];
+      const cache = neighbor ? app.metadataCache.getFileCache(neighbor.file) : null;
+      const nfm = cache && cache.frontmatter;
+
+      let file;
       try {
-        await this.createFileForView(draft.title, (fm) => {
+        file = await app.vault.create(path, draft.notes ? draft.notes.trim() + "\n" : "");
+        await app.fileManager.processFrontMatter(file, (fm) => {
+          if (nfm) {
+            for (const k of Object.keys(nfm)) {
+              if (k === "position" || k === dueKey || k === startKey || k === doneKey) continue;
+              fm[k] = JSON.parse(JSON.stringify(nfm[k]));
+            }
+          }
           fm[dueKey] = stamp(draft.due || draft.start);
           if (startKey && draft.start && draft.due) fm[startKey] = stamp(draft.start);
-          if (doneKey && fm[doneKey] === undefined) fm[doneKey] = false;
-          if (courseKey && draft.course && fm[courseKey] === undefined) {
+          if (doneKey) fm[doneKey] = false;
+          if (courseKey && draft.course) {
             const c = draft.course.replace(/^#/, "");
             fm[courseKey] = courseKey === "tags" ? [c] : c;
           }
         });
       } catch (e) {
-        console.error("[flow-planner] createFileForView failed", e);
+        console.error("[flow-planner] could not create the deadline note", e);
         new obsidian.Notice("Could not create the note: " + (e && e.message));
+        return;
       }
+
+      plugin.data.lastDeadlineFolder = folder;
+      plugin.saveAll();
+      this._checkLanding(file);
     }
 
-    // After a note is created, tell the user where it landed and whether
-    // this view's filter shows it. Obsidian decides that, so we just check
-    // whether the note appears in the rows it gives us.
-    _watchForNewNote(title) {
+    // A moment after a note is created, say where it landed and whether this
+    // view shows it. Obsidian applies the filters, so we only look at the
+    // rows it gives us.
+    _checkLanding(file) {
       if (this.pendingWatch) this.pendingWatch();
-      const vault = this.app.vault;
-      let timer = null;
-      const stop = () => {
-        vault.offref(ref);
-        clearTimeout(expire);
-        clearTimeout(timer);
+      const timer = setTimeout(() => {
         this.pendingWatch = null;
-      };
-      const ref = vault.on("create", (file) => {
-        if (!file.path || !file.path.endsWith(".md")) return;
-        if (title && !file.basename.startsWith(title)) return;
-        vault.offref(ref);
-        timer = setTimeout(() => {
-          this.pendingWatch = null;
-          clearTimeout(expire);
-          if (this.gone) return;
-          const shown = this.data.data.some((e) => e.file.path === file.path);
-          new obsidian.Notice(
-            shown
-              ? `Created "${file.path}".`
-              : `Created "${file.path}", but this view's filter hides it. Check its folder and properties.`,
-            shown ? 4000 : 10000,
-          );
-        }, TUNING.newNoteCheckMs);
-      });
-      const expire = setTimeout(stop, 60000);
-      this.pendingWatch = stop;
+        if (this.gone) return;
+        const shown = this.data.data.some((e) => e.file.path === file.path);
+        new obsidian.Notice(
+          shown
+            ? `Created "${file.path}".`
+            : `Created "${file.path}", but this view's filter hides it. Check its folder and properties.`,
+          shown ? 4000 : 10000,
+        );
+      }, TUNING.newNoteCheckMs);
+      this.pendingWatch = () => clearTimeout(timer);
     }
 
     _sync() {
@@ -310,6 +432,8 @@ function makeBasesView(obsidian, Planner, plugin) {
       );
       const { list, skipped } = entriesToDeadlines(app, entries, mapping, colors);
       this.mapping = mapping;
+      const shown = new Set(list.map((d) => d.noteLink));
+      this.rows = entries.filter((e) => shown.has(e.file.path));
       this.planner.setBaseDeadlines(list);
 
       const short = (p) => (p ? splitPropId(p).name : "none");
@@ -387,4 +511,8 @@ module.exports = {
   readProp,
   BASES_VIEW_TYPE,
   TUNING,
+  suggestNextName,
+  sanitizeFileName,
+  folderOf,
+  folderLabel,
 };

@@ -289,6 +289,7 @@ class Planner {
     this.baseOnly = false;
     this.baseDeadlines = [];
     this.createDeadline = null;
+    this.deadlineCreator = null; // folders, name suggestion, folder picker
     this.state = {
       zoom: 7,
       offset: 0,
@@ -896,6 +897,7 @@ class Planner {
     const isNew = !dl;
     // Inside a Bases view a new deadline is created as a note.
     const toNote = isNew && typeof this.createDeadline === "function";
+    const creator = toNote ? this.deadlineCreator : null;
     const d = dl
       ? JSON.parse(JSON.stringify(dl))
       : {
@@ -933,6 +935,67 @@ class Planner {
     });
     inputTitle.value = d.title;
 
+    // In a Bases view: which folder the new note goes in. The list is the
+    // folders of the rows the view shows, plus a picker for any other folder.
+    let folderSel = null;
+    if (creator) {
+      const PICK = "__pick__";
+      const labelOf = (p) => (p === "/" ? "(vault root)" : p.split("/").join(" / "));
+      const mfFolder = modal.createDiv({ cls: "tl-mf" });
+      modal.insertBefore(mfFolder, mfTitle);
+      mfFolder.createEl("label", { text: "Create in" });
+      folderSel = mfFolder.createEl("select");
+      const addOption = (value, label, before) => {
+        const opt = folderSel.ownerDocument.createElement("option");
+        opt.value = value;
+        opt.textContent = label;
+        folderSel.insertBefore(opt, before || null);
+        return opt;
+      };
+      const known = creator.folders();
+      known.forEach((f) => addOption(f.path, f.label));
+      const pickOpt = addOption(PICK, "Choose another folder…");
+      const last = creator.lastFolder();
+      let current = known.some((f) => f.path === last)
+        ? last
+        : known.length
+          ? known[0].path
+          : PICK;
+      folderSel.value = current;
+
+      // Suggest the next name in the folder until the user types their own.
+      let titleTouched = !!d.title;
+      inputTitle.addEventListener("input", () => {
+        titleTouched = true;
+      });
+      const suggest = () => {
+        if (!titleTouched && current !== PICK) {
+          inputTitle.value = creator.suggestName(current);
+        }
+      };
+      suggest();
+
+      folderSel.addEventListener("change", async () => {
+        folderSel.style.borderColor = "";
+        if (folderSel.value !== PICK) {
+          current = folderSel.value;
+          suggest();
+          return;
+        }
+        const picked = await creator.pickFolder();
+        if (picked == null) {
+          folderSel.value = current; // cancelled: keep the previous folder
+          return;
+        }
+        if (![...folderSel.options].some((o) => o.value === picked)) {
+          addOption(picked, labelOf(picked), pickOpt);
+        }
+        folderSel.value = picked;
+        current = picked;
+        suggest();
+      });
+    }
+
     // Due row
     const mfDue = modal.createDiv({ cls: "tl-mf" });
     mfDue.createEl("label", { text: "Due" });
@@ -957,7 +1020,6 @@ class Planner {
     const inputNotes = mfNotes.createEl("textarea");
     inputNotes.rows = 2;
     inputNotes.value = d.notes || "";
-    if (toNote) mfNotes.style.display = "none"; // not carried into the note
 
     // Note link
     const mfNote = modal.createDiv({ cls: "tl-mf" });
@@ -1069,12 +1131,19 @@ class Planner {
       }
 
       if (toNote) {
+        if (folderSel && (!folderSel.value || folderSel.value === "__pick__")) {
+          folderSel.style.borderColor = "#c0392b";
+          new Notice("Choose a folder for the new note.");
+          return;
+        }
         ov.remove();
         this.createDeadline({
           title,
           due,
           start,
           course: inputTags.value.trim(),
+          notes: inputNotes.value,
+          folder: folderSel ? folderSel.value : null,
         });
         return;
       }
@@ -1895,6 +1964,11 @@ class TimelinePlugin extends Plugin {
       events: Array.isArray(saved.events) ? saved.events : [],
       deadlines: Array.isArray(saved.deadlines) ? saved.deadlines : [],
       deadlineMode: saved.deadlineMode === true,
+      // Folder the last deadline note was created in (Bases view).
+      lastDeadlineFolder:
+        typeof saved.lastDeadlineFolder === "string"
+          ? saved.lastDeadlineFolder
+          : "",
       noteOpenMode: Object.prototype.hasOwnProperty.call(
         NOTE_OPEN_TARGETS,
         saved.noteOpenMode,
